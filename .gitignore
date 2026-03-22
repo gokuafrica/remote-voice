@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
+*.pyo
 tray.log
+TRAY_HOTKEY_ISSUES.md
+.git/
