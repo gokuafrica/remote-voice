@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+onnx-asr
+onnxruntime-gpu
+httpx
+huggingface_hub
