@@ -37,7 +37,7 @@ DEFAULTS = {
     "ollama_url": "http://localhost:11434",
     "ollama_model": "qwen2.5:3b",
     "voice_model": "nemo-parakeet-tdt-0.6b-v2",
-    "cleanup_prompt": "You clean transcripts. Apply ALL rules below to the transcript.\n\nRULES:\n\n1. Number words become digits: one->1, two->2, three->3, four->4, five->5, six->6, seven->7, eight->8, nine->9, ten->10, eleven->11, twelve->12, fifteen->15, twenty->20, twenty five->25, thirty->30, fifty->50, hundred->100. \"percent\"->%. Never change \"I\" or \"a\" to numbers.\n\n2. Self-corrections: \"sorry\", \"I meant\", \"I mean\", \"no wait\", \"actually\" = speaker fixing mistake. Delete wrong part + correction word, keep only the fix.\n\n3. Delete ONLY filler words: um, uh, \"you know\". Delete \"like\" only as filler. Keep \"like\" meaning enjoy/similar. Keep every other word exactly.\n\n4. Spoken punctuation: \"comma\"->, \"period\"->. \"question mark\"->? \"colon\"->:\n\n5. Capitalize first letter of each sentence. Add period at end if missing.\n\n6. Do NOT translate.\n\nCRITICAL: Do not delete meaningful words. Keep sentence structure intact.\n\nOutput ONLY the cleaned text.\n\nExamples:\n\"one plus one is four sorry I meant two\" -> \"1 plus 1 is 2.\"\n\"Um I need like twenty five dollars\" -> \"I need 25 dollars.\"\n\"send it to John no wait Mike\" -> \"Send it to Mike.\"\n\"I like this but like we should go\" -> \"I like this, but we should go.\"\n\"dear sir comma the price is ten dollars period\" -> \"Dear sir, the price is 10 dollars.\"\n\nTranscript:\n",
+    "cleanup_prompt": "You clean transcripts that have already been partially processed.\nNumbers, punctuation symbols, and filler words (um, uh) have already been handled.\n\nYour remaining tasks:\n\n1. Self-corrections: if the speaker corrects themselves (e.g., \"sorry\",\n   \"I meant\", \"no wait\", \"actually\"), delete the wrong part and the\n   correction word, keep only the fix. But if these words are used\n   naturally (e.g., \"I'm sorry for the delay\"), keep the sentence intact.\n\n2. Remove filler \"like\" ONLY when used as a filler. Keep \"like\" meaning\n   enjoy or similar.\n\n3. Smooth awkward phrasing left after filler removal.\n\n4. If the speaker restates something (says the same thing differently),\n   keep only the final version.\n\n5. Do NOT translate. Do NOT delete meaningful words.\n\nOutput ONLY the cleaned text.",
 }
 
 
@@ -182,10 +182,18 @@ class RemoteVoiceGUI:
         text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)  # remaining control chars
         return text
 
+    LOG_MAX_LINES = 2000
+
     def append_log(self, text):
         text = self.strip_ansi(text)
         self.log_text.configure(state=tk.NORMAL)
         self.log_text.insert(tk.END, text)
+        # Auto-trim: when log exceeds limit, drop the oldest half
+        total_lines = int(self.log_text.index("end-1c").split(".")[0])
+        if total_lines > self.LOG_MAX_LINES:
+            half = total_lines // 2
+            self.log_text.delete("1.0", f"{half}.0")
+            self.log_text.insert("1.0", f"--- older logs trimmed ({half} lines) ---\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state=tk.DISABLED)
 

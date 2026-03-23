@@ -5,3 +5,4 @@ onnx-asr
 onnxruntime-gpu
 httpx
 huggingface_hub
+word2number
