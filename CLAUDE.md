@@ -2,6 +2,10 @@
 
 This file is automatically loaded by Claude Code and other AI agents working on this repo. Follow these rules for every change.
 
+## Propose Before Committing
+
+Do NOT commit code changes without the user reviewing the approach first. When investigating an issue or considering a design change, present your findings and proposed solution to the user before writing code. This is especially important for changes that affect the pipeline's core behavior (prompt structure, cleanup logic, LLM interaction). Run experiments, share results, and let the user decide the direction.
+
 ## The Rule: Code, Tests, Docs — Always Together
 
 Every change to the pipeline must update all three in the same commit:

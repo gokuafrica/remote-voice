@@ -109,14 +109,9 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
 async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
     """Send raw transcript to Ollama for cleanup."""
     log.info(f"LLM cleanup using model: {OLLAMA_MODEL}")
+    prompt = CLEANUP_PROMPT
     if instruction:
-        prompt = (
-            f"Step 1: Clean the transcript (remove fillers, fix self-corrections).\n"
-            f"Step 2: {instruction}.\n\n"
-            f"Output ONLY the final result after both steps."
-        )
-    else:
-        prompt = CLEANUP_PROMPT
+        prompt += f"\n\nAdditional instruction from the speaker: {instruction}. Apply this while still following all cleanup rules above."
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
