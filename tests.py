@@ -55,11 +55,13 @@ def test(input_text, expected, label=""):
         print(f"    Got:      {result!r}")
 
 
-def test_trigger(input_text, expected_trigger, expected_text, label=""):
+def test_trigger(input_text, expected_trigger, expected_text,
+                 expected_instruction="", label=""):
     """Test the deep clean trigger detection."""
     global passed, failed, section_passed, section_failed
-    trigger, text = check_llm_trigger(input_text)
-    if trigger == expected_trigger and text == expected_text:
+    trigger, text, instruction = check_llm_trigger(input_text)
+    if (trigger == expected_trigger and text == expected_text
+            and instruction == expected_instruction):
         passed += 1
         section_passed += 1
         print(f"  PASS: {label}")
@@ -68,15 +70,15 @@ def test_trigger(input_text, expected_trigger, expected_text, label=""):
         section_failed += 1
         print(f"  FAIL: {label}")
         print(f"    Input:    {input_text!r}")
-        print(f"    Expected: trigger={expected_trigger}, text={expected_text!r}")
-        print(f"    Got:      trigger={trigger}, text={text!r}")
+        print(f"    Expected: trigger={expected_trigger}, text={expected_text!r}, instruction={expected_instruction!r}")
+        print(f"    Got:      trigger={trigger}, text={text!r}, instruction={instruction!r}")
 
 
 async def deep_clean(input_text):
     """Simulate the full deep clean path: trigger detection -> regex -> LLM."""
-    _, stripped = check_llm_trigger(input_text)
+    _, stripped, instruction = check_llm_trigger(input_text)
     regex_cleaned = lightweight_cleanup(stripped)
-    llm_result = await cleanup_with_ollama(regex_cleaned)
+    llm_result = await cleanup_with_ollama(regex_cleaned, instruction)
     return llm_result
 
 
@@ -258,18 +260,35 @@ if run_regex:
     # -------------------------------------------------------------------
     section("Deep Clean Trigger Detection")
     test_trigger("hello world deep clean", True, "hello world",
-                 "Basic trigger")
+                 label="Basic trigger")
     test_trigger("hello world, deep clean.", True, "hello world",
-                 "Trigger with Parakeet comma + period")
+                 label="Trigger with Parakeet comma + period")
     test_trigger("hello world, deep-clean.", True, "hello world",
-                 "Trigger with Parakeet hyphen")
+                 label="Trigger with Parakeet hyphen")
     test_trigger("hello world. Deep clean", True, "hello world",
-                 "Trigger with period before")
+                 label="Trigger with period before")
     test_trigger("hello world", False, "hello world",
-                 "No trigger present")
+                 label="No trigger present")
     test_trigger("I need to deep clean the house later", False,
                  "I need to deep clean the house later",
-                 "Not a trigger: 'deep clean' not at end")
+                 label="Not a trigger: 'deep clean' not at end")
+
+    # -------------------------------------------------------------------
+    section("Deep Clean With Custom Instruction")
+    test_trigger("two plus two is five deep clean with check the math",
+                 True, "two plus two is five", "check the math",
+                 label="Trigger with instruction")
+    test_trigger("some text, deep clean with make it formal.",
+                 True, "some text", "make it formal",
+                 label="Instruction with Parakeet comma + period")
+    test_trigger("some text, deep-clean with fix grammar.",
+                 True, "some text", "fix grammar",
+                 label="Instruction with Parakeet hyphen")
+    test_trigger("hello deep clean with verify the dates and names",
+                 True, "hello", "verify the dates and names",
+                 label="Longer instruction")
+    test_trigger("hello deep clean", True, "hello", "",
+                 label="No 'with' — instruction is empty")
 
     # -------------------------------------------------------------------
     section("Edge Cases")
@@ -380,6 +399,25 @@ if run_llm:
             must_contain=["30"],
             must_not_contain=["um", "25", "no wait"],
             label="Fillers removed by regex, correction by LLM, numbers converted",
+        )
+
+        # ---------------------------------------------------------------
+        section("Deep Clean With Custom Instruction")
+        test_llm(
+            "2 + 2 is 5. deep clean with check the math",
+            must_not_contain=["2 + 2 is 5"],
+            label="Math check instruction",
+        )
+        test_llm(
+            "The Eiffel Tower is in London. deep clean with check the facts",
+            must_contain=["Paris"],
+            must_not_contain=["London"],
+            label="Fact check instruction",
+        )
+        test_llm(
+            "hey can u come 2morrow. deep clean with make it formal",
+            must_not_contain=["hey"],
+            label="Formality instruction",
         )
 
         # Print final section count

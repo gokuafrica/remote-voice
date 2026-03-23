@@ -121,7 +121,28 @@ End your dictation with **"deep clean"** to route the text through the configure
 - **Natural restatements**: Keeps only the final version when you rephrase
 - **Grammar smoothing**: Fixes awkward phrasing left after filler removal
 
-**Known quirks (qwen2.5:7b):**
+#### Custom Instructions
+
+You can pass a custom instruction to the LLM by adding **"with"** after "deep clean":
+
+| You say | What happens |
+|---------|-------------|
+| "...text **deep clean**" | Standard deep clean (self-corrections, filler removal, etc.) |
+| "...text **deep clean with** check the math" | Deep clean + LLM also verifies the math |
+| "...text **deep clean with** check the facts" | Deep clean + LLM also fact-checks the content |
+| "...text **deep clean with** make it formal" | Deep clean + LLM also adjusts the tone |
+
+The instruction is appended to the LLM prompt as an additional directive. Without "with", deep clean works exactly as before — no false positive risk since nobody naturally ends a sentence with "deep clean with [something]."
+
+**Examples:**
+
+| You say | You get |
+|---------|---------|
+| "2 + 2 is 5. **deep clean with** check the math" | `2 + 2 is 4.` |
+| "The Eiffel Tower is in London. **deep clean with** check the facts" | `The Eiffel Tower is in Paris.` |
+| "hey can u come 2morrow. **deep clean with** make it formal" | `Can you come tomorrow?` |
+
+#### Known Quirks (qwen2.5:7b)
 
 - The LLM reliably handles clear corrections ("sorry I meant", "no wait", "I mean", "actually X"). `"Send it to John, no wait, Mike. deep clean"` → `Send it to Mike.`
 - `"I'm sorry for the delay"` stays intact — the LLM correctly identifies this as a natural apology, not a self-correction.
@@ -141,7 +162,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Server GUI** | `gui.py` | Configure models, prompt, start/stop server, view logs |
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 78 tests covering regex pipeline + LLM deep clean path |
+| **Tests** | `tests.py` | 86 tests covering regex pipeline + LLM deep clean path |
 
 ## Setup
 
@@ -285,9 +306,9 @@ python tests.py --regex-only # Regex tests only (no Ollama needed)
 python tests.py --llm-only   # LLM tests only
 ```
 
-**Part 1 — Regex tests (67 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, Parakeet comma/hyphen variations, new line/paragraph, scratch that, start over, numbered lists (including false positive rejection), deep clean trigger detection, and edge cases. These tests require no external dependencies and always produce the same result.
+**Part 1 — Regex tests (72 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, Parakeet comma/hyphen variations, new line/paragraph, scratch that, start over, numbered lists (including false positive rejection), deep clean trigger detection (with and without custom instructions), and edge cases. These tests require no external dependencies and always produce the same result.
 
-**Part 2 — LLM tests (11 tests):** End-to-end tests that send text through the full deep clean path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, and the combined regex+LLM pipeline. Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
+**Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep clean path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 
 ## Privacy
 

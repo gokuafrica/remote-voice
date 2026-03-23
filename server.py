@@ -106,9 +106,12 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
             os.unlink(wav_path)
 
 
-async def cleanup_with_ollama(raw_text: str) -> str:
+async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
     """Send raw transcript to Ollama for cleanup."""
     log.info(f"LLM cleanup using model: {OLLAMA_MODEL}")
+    prompt = CLEANUP_PROMPT
+    if instruction:
+        prompt += f"\n\nAdditional instruction: {instruction}"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -116,7 +119,7 @@ async def cleanup_with_ollama(raw_text: str) -> str:
                 json={
                     "model": OLLAMA_MODEL,
                     "messages": [
-                        {"role": "user", "content": CLEANUP_PROMPT + "\n" + raw_text},
+                        {"role": "user", "content": prompt + "\n" + raw_text},
                     ],
                     "stream": False,
                     "keep_alive": -1,
@@ -136,7 +139,12 @@ async def cleanup_with_ollama(raw_text: str) -> str:
 # Regex-based lightweight cleanup
 # ---------------------------------------------------------------------------
 
-LLM_TRIGGER = re.compile(r'[,.]?\s*\bdeep[\s-]+clean\b[,.]?\s*$', re.IGNORECASE)
+LLM_TRIGGER = re.compile(
+    r'[,.]?\s*\bdeep[\s-]+clean\b'          # "deep clean" command
+    r'(?:\s+with\s+(.+?))?'                  # optional "with <instruction>"
+    r'[,.]?\s*$',                             # trailing punct + end
+    re.IGNORECASE,
+)
 
 START_OVER = re.compile(r'^.*[,.]?\s*\bstart[\s-]+over\b[,.]?\s*', re.IGNORECASE)
 
@@ -182,12 +190,19 @@ BULLET_PATTERN = re.compile(r'[,.]?\s*\bbullet[\s-]+(\d+)\b[,.]?\s*', re.IGNOREC
 END_LIST = re.compile(r'[,.]?\s*\bend[\s-]+list\b[,.]?\s*', re.IGNORECASE)
 
 
-def check_llm_trigger(text: str) -> tuple[bool, str]:
-    """Check if text ends with 'deep clean' command."""
-    if LLM_TRIGGER.search(text):
-        cleaned = LLM_TRIGGER.sub('', text).strip()
-        return True, cleaned
-    return False, text
+def check_llm_trigger(text: str) -> tuple[bool, str, str]:
+    """Check if text ends with 'deep clean' command.
+
+    Returns (trigger, cleaned_text, instruction).
+    'instruction' is empty for plain 'deep clean', or the user's
+    custom instruction for 'deep clean with <instruction>'.
+    """
+    m = LLM_TRIGGER.search(text)
+    if m:
+        cleaned = text[:m.start()].strip()
+        instruction = (m.group(1) or '').strip().rstrip('.,!?')
+        return True, cleaned, instruction
+    return False, text, ""
 
 
 def convert_number_words(text: str) -> str:
@@ -377,7 +392,7 @@ async def process_audio(audio_bytes: bytes, filename: str) -> str:
         return ""
 
     # Check for "deep clean" trigger before regex cleanup
-    use_llm, text = check_llm_trigger(raw_text)
+    use_llm, text, instruction = check_llm_trigger(raw_text)
 
     # Always run regex cleanup first
     cleaned_text = lightweight_cleanup(text)
@@ -386,8 +401,11 @@ async def process_audio(audio_bytes: bytes, filename: str) -> str:
 
     # If user said "deep clean", also run through LLM
     if use_llm:
-        log.info(f"Deep clean: YES — routing to LLM ({OLLAMA_MODEL})")
-        cleaned_text = await cleanup_with_ollama(cleaned_text)
+        if instruction:
+            log.info(f"Deep clean: YES — routing to LLM ({OLLAMA_MODEL}) with instruction: {instruction}")
+        else:
+            log.info(f"Deep clean: YES — routing to LLM ({OLLAMA_MODEL})")
+        cleaned_text = await cleanup_with_ollama(cleaned_text, instruction)
         t3 = time.perf_counter()
         log.info(f"LLM cleanup: {t3 - t2:.2f}s | final: {cleaned_text}")
         log.info(f"Total: {t3 - t0:.2f}s (regex + LLM)")
