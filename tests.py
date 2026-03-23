@@ -18,9 +18,12 @@ from server import (
     lightweight_cleanup,
     check_llm_trigger,
     cleanup_with_ollama,
+    compile_pronunciation_fixes,
+    apply_pronunciation_fixes,
     OLLAMA_URL,
     OLLAMA_MODEL,
 )
+import server
 
 passed = 0
 failed = 0
@@ -204,6 +207,15 @@ if run_regex:
     test("Check this. Open parenthesis note. Close parenthesis done.", "Check this (note) done.", "Period before parentheses")
 
     # -------------------------------------------------------------------
+    section("Duplicate Comma Collapse")
+    test("Dear sir, comma the answer is no.", "Dear sir, the answer is no.",
+         "Parakeet comma + spoken comma collapsed")
+    test("items,, , and more.", "Items, and more.",
+         "Triple comma collapsed")
+    test("wait ellipsis never mind.", "Wait... Never mind.",
+         "Ellipsis NOT collapsed (only commas)")
+
+    # -------------------------------------------------------------------
     section("No Forced Trailing Period")
     test("Hello how are you", "Hello how are you", "No period added when Parakeet omits it")
     test("Hello how are you.", "Hello how are you.", "Period preserved when Parakeet adds it")
@@ -213,14 +225,18 @@ if run_regex:
     # -------------------------------------------------------------------
     section("New Line / New Paragraph")
     test("hello new line how are you", "Hello\nHow are you", "New line (no commas)")
-    test("hello, new line, how are you", "Hello\nHow are you", "New line (Parakeet commas)")
-    test("hello, new-line, how are you", "Hello\nHow are you", "New line (Parakeet hyphen)")
+    test("hello, new line, how are you", "Hello,\nHow are you", "New line (Parakeet commas)")
+    test("hello, new-line, how are you", "Hello,\nHow are you", "New line (Parakeet hyphen)")
     test("first paragraph new paragraph second paragraph",
          "First paragraph.\n\nSecond paragraph", "New paragraph (no commas)")
     test("first paragraph, new paragraph, second paragraph",
          "First paragraph.\n\nSecond paragraph", "New paragraph (Parakeet commas)")
     test("first paragraph. New paragraph, second paragraph",
          "First paragraph.\n\nSecond paragraph", "New paragraph (period before)")
+    test("first sentence. New line second sentence",
+         "First sentence.\nSecond sentence", "New line preserves period before")
+    test("first sentence, new line, second sentence",
+         "First sentence,\nSecond sentence", "New line preserves Parakeet comma")
 
     # -------------------------------------------------------------------
     section("Scratch That")
@@ -230,6 +246,12 @@ if run_regex:
          "I need apples.", "Comma before command")
     test("I need apples. Get oranges, scratch-that.",
          "I need apples.", "Parakeet hyphen")
+    test("first line. New line second line. Scratch that third line.",
+         "First line.\nThird line.", "Respects newline boundary")
+    test("first para. New paragraph second para. Scratch that third para.",
+         "First para.\n\nThird para.", "Respects paragraph boundary")
+    test("hello. New line your true scratch that yours truly",
+         "Hello.\nYours truly", "Preserves newline before replacement")
 
     # -------------------------------------------------------------------
     section("Start Over")
@@ -292,6 +314,75 @@ if run_regex:
     test_trigger("some text. Deep clean plus, make it formal.",
                  True, "some text", "make it formal",
                  label="Parakeet comma after 'plus'")
+
+    # -------------------------------------------------------------------
+    section("Pronunciation Fixes")
+
+    # Inject test fixes, then restore after
+    _original_patterns = server.PRONUNCIATION_FIX_PATTERNS
+    server.PRONUNCIATION_FIX_PATTERNS = compile_pronunciation_fixes({
+        "new lion": "new line",
+    })
+
+    def test_fix(input_text, expected, label=""):
+        """Test pronunciation fix + lightweight_cleanup combined."""
+        global passed, failed, section_passed, section_failed
+        fixed = apply_pronunciation_fixes(input_text)
+        result = lightweight_cleanup(fixed)
+        if result == expected:
+            passed += 1
+            section_passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            section_failed += 1
+            print(f"  FAIL: {label}")
+            print(f"    Input:    {input_text!r}")
+            print(f"    After fix:{fixed!r}")
+            print(f"    Expected: {expected!r}")
+            print(f"    Got:      {result!r}")
+
+    def test_sub(input_text, expected, label=""):
+        """Test pronunciation fix substitution only (no cleanup)."""
+        global passed, failed, section_passed, section_failed
+        result = apply_pronunciation_fixes(input_text)
+        if result == expected:
+            passed += 1
+            section_passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            section_failed += 1
+            print(f"  FAIL: {label}")
+            print(f"    Input:    {input_text!r}")
+            print(f"    Expected: {expected!r}")
+            print(f"    Got:      {result!r}")
+
+    # Substitution only (no cleanup)
+    test_sub("hello new lion world", "hello new line world",
+             "Substitution only: new lion -> new line")
+    test_sub("hello new-lion world", "hello new line world",
+             "Substitution with Parakeet hyphen: new-lion -> new line")
+
+    # Full pipeline: substitution + cleanup
+    test_fix("hello new lion world", "Hello\nWorld",
+             "Full pipeline: new lion triggers line break")
+    test_fix("hello, new lion, world", "Hello,\nWorld",
+             "Full pipeline with Parakeet commas")
+    test_fix("hello, new-lion, world", "Hello,\nWorld",
+             "Full pipeline with Parakeet hyphen")
+    test_fix("first new lion second new lion third", "First\nSecond\nThird",
+             "Multiple occurrences both replaced")
+
+    # Original command still works
+    test_fix("hello new line world", "Hello\nWorld",
+             "Original 'new line' command unaffected")
+
+    # No fixes configured
+    server.PRONUNCIATION_FIX_PATTERNS = compile_pronunciation_fixes({})
+    test_sub("hello new lion world", "hello new lion world",
+             "Empty fixes dict: no substitution")
+    server.PRONUNCIATION_FIX_PATTERNS = _original_patterns
 
     # -------------------------------------------------------------------
     section("Edge Cases")

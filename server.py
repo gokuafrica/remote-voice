@@ -50,6 +50,39 @@ OLLAMA_MODEL = cfg.get("ollama_model", "qwen2.5:3b")
 SERVER_PORT = int(cfg.get("server_port", 8787))
 VOICE_MODEL = cfg.get("voice_model", "nemo-parakeet-tdt-0.6b-v2")
 CLEANUP_PROMPT = cfg.get("cleanup_prompt", "Clean this transcript:\n")
+PRONUNCIATION_FIXES = cfg.get("pronunciation_fixes", {})
+
+# ---------------------------------------------------------------------------
+# Pronunciation fixes — accent-based alias substitution
+# ---------------------------------------------------------------------------
+
+
+def compile_pronunciation_fixes(fixes: dict) -> list[tuple[re.Pattern, str]]:
+    """Compile a {mispronunciation: correction} dict into regex patterns.
+
+    Each multi-word key gets [\\s-]+ between words (handles Parakeet hyphens)
+    and \\b word boundaries (prevents partial word matches). Sorted longest-first
+    so more specific phrases match before shorter ones.
+    """
+    patterns = []
+    for wrong, right in sorted(fixes.items(), key=lambda x: -len(x[0].split())):
+        words = wrong.strip().split()
+        if not words:
+            continue
+        regex = r'\b' + r'[\s-]+'.join(re.escape(w) for w in words) + r'\b'
+        patterns.append((re.compile(regex, re.IGNORECASE), right))
+    return patterns
+
+
+PRONUNCIATION_FIX_PATTERNS = compile_pronunciation_fixes(PRONUNCIATION_FIXES)
+
+
+def apply_pronunciation_fixes(text: str) -> str:
+    """Replace known mispronunciations before pipeline processing."""
+    for pattern, replacement in PRONUNCIATION_FIX_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 
 # ---------------------------------------------------------------------------
 # App
@@ -148,12 +181,12 @@ LLM_TRIGGER = re.compile(
 
 START_OVER = re.compile(r'^.*[,.]?\s*\bstart[\s-]+over\b[,.]?\s*', re.IGNORECASE)
 
-SCRATCH_THAT = re.compile(r'[^.!?]*[,.]?\s*\bscratch[\s-]+that\b[,.]?\s*', re.IGNORECASE)
+SCRATCH_THAT = re.compile(r'[^.!?\n]*[,.]?[^\S\n]*\bscratch[\s-]+that\b[,.]?[^\S\n]*', re.IGNORECASE)
 
 FILLER_PATTERN = re.compile(r'\b(um|uh|you[\s-]+know)\b[,.]?\s*', re.IGNORECASE)
 
 NEW_PARAGRAPH = re.compile(r'[,.]?\s*\bnew[\s-]+paragraph\b[,.]?\s*', re.IGNORECASE)
-NEW_LINE = re.compile(r'[,.]?\s*\bnew[\s-]+line\b[,.]?\s*', re.IGNORECASE)
+NEW_LINE = re.compile(r'([,.]?)\s*\bnew[\s-]+line\b[,.]?\s*', re.IGNORECASE)
 
 SPOKEN_PUNCTUATION = [
     # Multi-word: consume leading space/punct only (preserve trailing space for natural flow)
@@ -305,38 +338,50 @@ def lightweight_cleanup(text: str) -> str:
     if not text or not text.strip():
         return ""
 
-    # 3b. Handle "start over"
+    # 1. Handle "start over"
     text = START_OVER.sub('', text).strip()
     if not text:
         return ""
 
-    # 3c. Handle "scratch that"
-    text = SCRATCH_THAT.sub('', text).strip()
-    if not text:
-        return ""
-
-    # 3d. Remove filler words
+    # 2. Remove filler words
     text = FILLER_PATTERN.sub('', text)
 
-    # 3e. Convert spoken punctuation to symbols
+    # 3. Convert spoken punctuation to symbols
     for pattern, symbol in SPOKEN_PUNCTUATION:
         text = pattern.sub(symbol, text)
 
-    # Remove Parakeet's period before manually dictated punctuation
+    # 4. Remove Parakeet's period before manually dictated punctuation
     text = re.sub(r'\.\s*([,;:?!\-/\'\"()%])', r'\1', text)
 
-    # Fix spacing around quotes: add space before opening quote (between two letters)
+    # 5. Collapse duplicate commas (e.g., Parakeet comma + spoken "comma")
+    text = re.sub(r',([\s]*,)+', ',', text)
+
+    # 6. Fix spacing around quotes: add space before opening quote (between two letters)
     text = re.sub(r'([a-zA-Z])"([a-zA-Z])', r'\1 "\2', text)
 
-    # 3f. Handle "new paragraph" and "new line" (order matters)
+    # 7. Handle "new paragraph" and "new line" (before scratch-that so
+    #    line/paragraph boundaries are real \n chars that scratch-that respects)
     def _new_paragraph_repl(m):
         if m.start() == 0:
             return '\n\n'
         return '.\n\n'
-    text = NEW_PARAGRAPH.sub(_new_paragraph_repl, text)
-    text = NEW_LINE.sub('\n', text)
 
-    # 3g. Convert number words to digits
+    def _new_line_repl(m):
+        pre = m.group(1)
+        if pre:
+            return pre + '\n'
+        return '\n'
+
+    text = NEW_PARAGRAPH.sub(_new_paragraph_repl, text)
+    text = NEW_LINE.sub(_new_line_repl, text)
+
+    # 8. Handle "scratch that" — runs after new paragraph/line so it
+    #    respects line and paragraph boundaries (stops at \n)
+    text = SCRATCH_THAT.sub(' ', text).strip()
+    if not text:
+        return ""
+
+    # 9. Convert number words to digits
     # Process each line separately to preserve newlines
     lines = text.split('\n')
     lines = [convert_number_words(line) for line in lines]
@@ -345,10 +390,10 @@ def lightweight_cleanup(text: str) -> str:
     # Convert "percent" to %
     text = re.sub(r'\s*\bpercent\b', '%', text, flags=re.IGNORECASE)
 
-    # 3h. Handle numbered lists
+    # 10. Handle numbered lists
     text = format_numbered_list(text)
 
-    # 3i. Final cleanup
+    # 11. Final cleanup
     # Clean up extra spaces from removals (but preserve newlines)
     lines = text.split('\n')
     lines = [re.sub(r'\s{2,}', ' ', line).strip() for line in lines]
@@ -390,6 +435,9 @@ async def process_audio(audio_bytes: bytes, filename: str) -> str:
     if not raw_text.strip():
         log.info("Empty transcript -- skipping cleanup")
         return ""
+
+    # Apply pronunciation fixes before any processing
+    raw_text = apply_pronunciation_fixes(raw_text)
 
     # Check for "deep clean" trigger before regex cleanup
     use_llm, text, instruction = check_llm_trigger(raw_text)

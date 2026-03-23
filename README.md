@@ -46,7 +46,7 @@ These commands are recognized during dictation and processed by the regex pipeli
 
 | You say | Result | Example |
 |---------|--------|---------|
-| **scratch that** | Deletes the current and preceding sentence | "I need apples. Get oranges. **Scratch that.**" → `I need apples.` |
+| **scratch that** | Deletes the current and preceding sentence (respects line/paragraph boundaries) | "I need apples. Get oranges. **Scratch that.**" → `I need apples.` |
 | **start over** | Deletes everything before it, keeps only what follows | "blah blah **start over** the real message" → `The real message` |
 
 ### Numbered Lists
@@ -106,11 +106,38 @@ The words "I" and "a" are never converted to numbers.
 
 **um**, **uh**, and **you know** are automatically removed. The word **like** is deliberately *not* removed by regex because it can't distinguish filler ("it was like super hard") from verb ("I like this"). Use the **"deep clean"** command if you need filler "like" cleaned up.
 
+### Pronunciation Fixes
+
+If Parakeet consistently mishears a word or phrase due to your accent, you can define pronunciation fixes. These run before all other processing — the mispronounced words are silently replaced with the correct ones, and then the pipeline handles them normally.
+
+Configure fixes in the GUI under **Pronunciation Fixes** (format: `wrong = correct`, one per line), or in `config.json`:
+
+```json
+{
+    "pronunciation_fixes": {
+        "new lion": "new line"
+    }
+}
+```
+
+**How it works:** The fix replaces the mispronounced words with the correct words in the raw transcript. Parakeet hyphens between alias words are handled automatically (e.g., "new-lion" also matches). Surrounding punctuation (commas, periods) is left untouched — the downstream voice command regex handles that as usual.
+
+| Parakeet hears | Fix produces | Pipeline result |
+|---|---|---|
+| "hello **new lion** world" | "hello **new line** world" | `hello`<br>`world` |
+| "hello, **new-lion**, world" | "hello, **new line**, world" | `hello`<br>`world` |
+
+**Important:** Every occurrence of the mispronounced phrase will be replaced — the fix doesn't know whether you meant it literally. Only add entries you're confident won't appear naturally in your speech. The server must be restarted after changing fixes.
+
 ### Punctuation Behavior
 
 **Parakeet's punctuation is trusted.** The pipeline does not force a trailing period onto your text. If Parakeet adds a period at the end, it stays. If it doesn't (e.g., for sentence fragments or questions), nothing is added. This means the output preserves Parakeet's own judgment about sentence structure.
 
 **Period removal before manual punctuation:** When you dictate spoken punctuation (e.g., "comma", "question mark"), Parakeet may have already added a period before it — thinking the sentence ended. The pipeline automatically removes that stale period. For example, Parakeet might output `"Dear sir. Comma the answer is no."` and the pipeline produces `Dear sir, the answer is no.` (the period before "comma" is cleaned up).
+
+**Duplicate comma collapse:** If Parakeet adds a comma at a natural pause and you also say "comma", the resulting double comma (`,,`) is automatically collapsed to a single comma.
+
+**Punctuation preserved before new line:** If Parakeet adds a period or comma before "new line", it is preserved. For example, `"end of sentence. New line next sentence"` produces `end of sentence.` followed by a line break, and `"Dear President, new line, hello"` produces `Dear President,` followed by a line break.
 
 ### Deep Clean — LLM Post-Processing (Optional)
 
@@ -162,7 +189,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Server GUI** | `gui.py` | Configure models, prompt, start/stop server, view logs |
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 86 tests covering regex pipeline + LLM deep clean path |
+| **Tests** | `tests.py` | 103 tests covering regex pipeline + LLM deep clean path |
 
 ## Setup
 
@@ -306,7 +333,7 @@ python tests.py --regex-only # Regex tests only (no Ollama needed)
 python tests.py --llm-only   # LLM tests only
 ```
 
-**Part 1 — Regex tests (72 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, Parakeet comma/hyphen variations, new line/paragraph, scratch that, start over, numbered lists (including false positive rejection), deep clean trigger detection (with and without custom instructions), and edge cases. These tests require no external dependencies and always produce the same result.
+**Part 1 — Regex tests (89 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep clean trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
 
 **Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep clean path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 

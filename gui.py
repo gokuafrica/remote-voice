@@ -38,6 +38,7 @@ DEFAULTS = {
     "ollama_model": "qwen2.5:3b",
     "voice_model": "nemo-parakeet-tdt-0.6b-v2",
     "cleanup_prompt": "You clean transcripts that have already been partially processed.\nNumbers, punctuation symbols, and filler words (um, uh) have already been handled.\n\nYour remaining tasks:\n\n1. Self-corrections: if the speaker corrects themselves (e.g., \"sorry\",\n   \"I meant\", \"no wait\", \"actually\"), delete the wrong part and the\n   correction word, keep only the fix. But if these words are used\n   naturally (e.g., \"I'm sorry for the delay\"), keep the sentence intact.\n\n2. Remove filler \"like\" ONLY when used as a filler. Keep \"like\" meaning\n   enjoy or similar.\n\n3. Smooth awkward phrasing left after filler removal.\n\n4. If the speaker restates something (says the same thing differently),\n   keep only the final version.\n\n5. Do NOT translate. Do NOT delete meaningful words.\n\nOutput ONLY the cleaned text.",
+    "pronunciation_fixes": {},
 }
 
 
@@ -77,6 +78,18 @@ class RemoteVoiceGUI:
         self.config["ollama_model"] = self.ollama_model_var.get()
         self.config["voice_model"] = self.voice_model_var.get()
         self.config["cleanup_prompt"] = self.prompt_text.get("1.0", tk.END).rstrip("\n")
+
+        # Parse pronunciation fixes from text area (format: "wrong = correct" per line)
+        fixes = {}
+        for line in self.fixes_text.get("1.0", tk.END).strip().splitlines():
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            wrong, correct = line.split("=", 1)
+            wrong, correct = wrong.strip(), correct.strip()
+            if wrong and correct:
+                fixes[wrong] = correct
+        self.config["pronunciation_fixes"] = fixes
 
         with open(CONFIG_PATH, "w") as f:
             json.dump(self.config, f, indent=4)
@@ -127,6 +140,13 @@ class RemoteVoiceGUI:
 
         settings_frame.columnconfigure(1, weight=1)
 
+        # --- Pronunciation Fixes ---
+        fixes_frame = ttk.LabelFrame(self.root, text="Pronunciation Fixes (one per line: wrong = correct)", padding=10)
+        fixes_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.fixes_text = scrolledtext.ScrolledText(fixes_frame, wrap=tk.WORD, height=3, font=("Consolas", 10))
+        self.fixes_text.pack(fill=tk.X)
+
         # --- Prompt ---
         prompt_frame = ttk.LabelFrame(self.root, text="Cleanup Prompt (sent to Ollama)", padding=10)
         prompt_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -154,6 +174,13 @@ class RemoteVoiceGUI:
         self.voice_model_var.set(self.config["voice_model"])
         self.prompt_text.delete("1.0", tk.END)
         self.prompt_text.insert("1.0", self.config["cleanup_prompt"].rstrip("\n"))
+
+        # Display pronunciation fixes as "wrong = correct" lines
+        fixes = self.config.get("pronunciation_fixes", {})
+        fixes_text = "\n".join(f"{wrong} = {correct}" for wrong, correct in fixes.items())
+        self.fixes_text.delete("1.0", tk.END)
+        if fixes_text:
+            self.fixes_text.insert("1.0", fixes_text)
 
     def copy_logs(self):
         logs = self.log_text.get("1.0", tk.END).strip()

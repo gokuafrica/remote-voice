@@ -29,11 +29,12 @@ Do not merge or commit a change that updates code without corresponding test and
 ## How the Pipeline Works
 
 ```
-Audio → Parakeet V2 (transcription) → check_llm_trigger() → lightweight_cleanup() → [optional] cleanup_with_ollama() → return text
+Audio → Parakeet V2 (transcription) → apply_pronunciation_fixes() → check_llm_trigger() → lightweight_cleanup() → [optional] cleanup_with_ollama() → return text
 ```
 
+- `apply_pronunciation_fixes()` replaces known mispronunciations (from `config.json` `pronunciation_fixes`) before any other processing. Uses `[\s-]+` between words and `\b` word boundaries. Does NOT consume surrounding punctuation — downstream command regexes handle that.
 - `check_llm_trigger()` detects "deep clean" at end of text. Returns `(trigger: bool, text: str, instruction: str)`.
-- `lightweight_cleanup()` runs all regex: start over, scratch that, fillers, spoken punctuation, period cleanup, new line/paragraph, number conversion, numbered lists, final capitalization/spacing.
+- `lightweight_cleanup()` runs all regex in this order: start over, fillers, spoken punctuation, period cleanup, duplicate comma collapse, quote spacing, new paragraph/line, scratch that, number conversion, numbered lists, final capitalization/spacing. Note: new paragraph/line runs BEFORE scratch that so that scratch that respects line/paragraph boundaries (stops at `\n`).
 - `cleanup_with_ollama()` only runs when the user explicitly says "deep clean". Accepts an optional custom instruction via "deep clean plus <instruction>".
 
 ## Regex Pattern Conventions
@@ -79,3 +80,8 @@ These must stay in sync when the LLM prompt changes:
 1. `config.json` → `cleanup_prompt` field
 2. `gui.py` → `DEFAULTS["cleanup_prompt"]`
 3. `handy-prompt.txt` → standalone copy
+
+When `pronunciation_fixes` changes:
+1. `config.json` → `pronunciation_fixes` field
+2. `gui.py` → `DEFAULTS["pronunciation_fixes"]`
+3. `server.py` → `PRONUNCIATION_FIX_PATTERNS` (compiled at module load from config)
