@@ -289,6 +289,9 @@ if run_regex:
                  label="Longer instruction")
     test_trigger("hello deep clean", True, "hello", "",
                  label="No 'plus' — instruction is empty")
+    test_trigger("some text. Deep clean plus, make it formal.",
+                 True, "some text", "make it formal",
+                 label="Parakeet comma after 'plus'")
 
     # -------------------------------------------------------------------
     section("Edge Cases")
