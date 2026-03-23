@@ -132,7 +132,7 @@ You can pass a custom instruction to the LLM by adding **"plus"** after "deep cl
 | "...text **deep clean plus** check the facts" | Deep clean + LLM also fact-checks the content |
 | "...text **deep clean plus** make it formal" | Deep clean + LLM also adjusts the tone |
 
-The instruction is appended to the LLM prompt as an additional directive. Without "plus", deep clean works exactly as before — no false positive risk since nobody naturally ends a sentence with "deep clean plus [something]."
+When a custom instruction is provided, it **replaces** the standard cleanup prompt entirely. The LLM receives a two-step directive: (1) clean the transcript, (2) apply your instruction. This gives the instruction full control — the conservative cleanup prompt doesn't suppress it. Without "plus", deep clean uses the standard cleanup prompt as before. We use "plus" instead of "with" because Parakeet mishears "with" as "wet" after "deep clean" (linguistic context bias).
 
 **Examples:**
 
