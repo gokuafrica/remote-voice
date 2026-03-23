@@ -141,7 +141,7 @@ async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
 
 LLM_TRIGGER = re.compile(
     r'[,.]?\s*\bdeep[\s-]+clean\b'          # "deep clean" command
-    r'(?:\s+with\s+(.+?))?'                  # optional "with <instruction>"
+    r'(?:\s+plus\s+(.+?))?'                  # optional "plus <instruction>"
     r'[,.]?\s*$',                             # trailing punct + end
     re.IGNORECASE,
 )

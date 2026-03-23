@@ -123,24 +123,24 @@ End your dictation with **"deep clean"** to route the text through the configure
 
 #### Custom Instructions
 
-You can pass a custom instruction to the LLM by adding **"with"** after "deep clean":
+You can pass a custom instruction to the LLM by adding **"plus"** after "deep clean":
 
 | You say | What happens |
 |---------|-------------|
 | "...text **deep clean**" | Standard deep clean (self-corrections, filler removal, etc.) |
-| "...text **deep clean with** check the math" | Deep clean + LLM also verifies the math |
-| "...text **deep clean with** check the facts" | Deep clean + LLM also fact-checks the content |
-| "...text **deep clean with** make it formal" | Deep clean + LLM also adjusts the tone |
+| "...text **deep clean plus** check the math" | Deep clean + LLM also verifies the math |
+| "...text **deep clean plus** check the facts" | Deep clean + LLM also fact-checks the content |
+| "...text **deep clean plus** make it formal" | Deep clean + LLM also adjusts the tone |
 
-The instruction is appended to the LLM prompt as an additional directive. Without "with", deep clean works exactly as before — no false positive risk since nobody naturally ends a sentence with "deep clean with [something]."
+The instruction is appended to the LLM prompt as an additional directive. Without "plus", deep clean works exactly as before — no false positive risk since nobody naturally ends a sentence with "deep clean plus [something]."
 
 **Examples:**
 
 | You say | You get |
 |---------|---------|
-| "2 + 2 is 5. **deep clean with** check the math" | `2 + 2 is 4.` |
-| "The Eiffel Tower is in London. **deep clean with** check the facts" | `The Eiffel Tower is in Paris.` |
-| "hey can u come 2morrow. **deep clean with** make it formal" | `Can you come tomorrow?` |
+| "2 + 2 is 5. **deep clean plus** check the math" | `2 + 2 is 4.` |
+| "The Eiffel Tower is in London. **deep clean plus** check the facts" | `The Eiffel Tower is in Paris.` |
+| "hey can u come 2morrow. **deep clean plus** make it formal" | `Can you come tomorrow?` |
 
 #### Known Quirks (qwen2.5:7b)
 

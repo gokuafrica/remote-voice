@@ -274,21 +274,21 @@ if run_regex:
                  label="Not a trigger: 'deep clean' not at end")
 
     # -------------------------------------------------------------------
-    section("Deep Clean With Custom Instruction")
-    test_trigger("two plus two is five deep clean with check the math",
+    section("Deep Clean Plus Custom Instruction")
+    test_trigger("two plus two is five deep clean plus check the math",
                  True, "two plus two is five", "check the math",
                  label="Trigger with instruction")
-    test_trigger("some text, deep clean with make it formal.",
+    test_trigger("some text, deep clean plus make it formal.",
                  True, "some text", "make it formal",
                  label="Instruction with Parakeet comma + period")
-    test_trigger("some text, deep-clean with fix grammar.",
+    test_trigger("some text, deep-clean plus fix grammar.",
                  True, "some text", "fix grammar",
                  label="Instruction with Parakeet hyphen")
-    test_trigger("hello deep clean with verify the dates and names",
+    test_trigger("hello deep clean plus verify the dates and names",
                  True, "hello", "verify the dates and names",
                  label="Longer instruction")
     test_trigger("hello deep clean", True, "hello", "",
-                 label="No 'with' — instruction is empty")
+                 label="No 'plus' — instruction is empty")
 
     # -------------------------------------------------------------------
     section("Edge Cases")
@@ -402,20 +402,20 @@ if run_llm:
         )
 
         # ---------------------------------------------------------------
-        section("Deep Clean With Custom Instruction")
+        section("Deep Clean Plus Custom Instruction")
         test_llm(
-            "2 + 2 is 5. deep clean with check the math",
+            "2 + 2 is 5. deep clean plus check the math",
             must_not_contain=["2 + 2 is 5"],
             label="Math check instruction",
         )
         test_llm(
-            "The Eiffel Tower is in London. deep clean with check the facts",
+            "The Eiffel Tower is in London. deep clean plus check the facts",
             must_contain=["Paris"],
             must_not_contain=["London"],
             label="Fact check instruction",
         )
         test_llm(
-            "hey can u come 2morrow. deep clean with make it formal",
+            "hey can u come 2morrow. deep clean plus make it formal",
             must_not_contain=["hey"],
             label="Formality instruction",
         )
