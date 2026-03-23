@@ -63,7 +63,8 @@ async def lifespan(app):
     global model
     log.info(f"Loading voice model: {VOICE_MODEL}")
     model = onnx_asr.load_model(VOICE_MODEL)
-    log.info("Model loaded and ready.")
+    log.info(f"Voice model loaded. LLM model (from config): {OLLAMA_MODEL}")
+    log.info("Server ready.")
     yield
 
 
@@ -105,6 +106,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
 
 async def cleanup_with_ollama(raw_text: str) -> str:
     """Send raw transcript to Ollama for cleanup."""
+    log.info(f"LLM cleanup using model: {OLLAMA_MODEL}")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -118,7 +120,10 @@ async def cleanup_with_ollama(raw_text: str) -> str:
                 },
             )
             resp.raise_for_status()
-            return resp.json()["message"]["content"].strip()
+            data = resp.json()
+            actual_model = data.get("model", "unknown")
+            log.info(f"Ollama responded with model: {actual_model}")
+            return data["message"]["content"].strip()
     except Exception as e:
         log.warning(f"Ollama cleanup failed ({e}), returning raw transcript")
         return raw_text
