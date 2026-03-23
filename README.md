@@ -310,6 +310,18 @@ python tests.py --llm-only   # LLM tests only
 
 **Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep clean path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 
+## Contributing
+
+Every change must update **code, tests, and docs together** in the same commit:
+
+1. **Code** — implement the change in `server.py` / `gui.py` / etc.
+2. **Tests** — add or update tests in `tests.py` covering the change
+3. **Docs** — update this README to reflect the new behavior
+
+Run `python tests.py --regex-only` before committing (fast, no dependencies). Run `python tests.py` for the full suite if Ollama is available.
+
+AI agents: see `CLAUDE.md` for detailed project conventions, architecture, and regex pattern rules.
+
 ## Privacy
 
 - All processing is local — audio never leaves your network
