@@ -543,7 +543,13 @@ class RemoteVoiceMacTray(rumps.App):
                 for frame in self.frames:
                     wf.writeframes(frame.tobytes())
 
-            audio_bytes, filename, mime = self._compress_audio(wav_path)
+            duration = sum(len(f) for f in self.frames) / self.actual_sr
+            if duration < 5:
+                with open(wav_path, "rb") as f:
+                    audio_bytes = f.read()
+                filename, mime = "audio.wav", "audio/wav"
+            else:
+                audio_bytes, filename, mime = self._compress_audio(wav_path)
             os.unlink(wav_path)
 
             server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])

@@ -13,9 +13,15 @@ Hotkey approach inspired by Handy STT (github.com/cjpais/Handy):
 import ctypes
 import io
 import json
+import os
 import re
+import subprocess
+import tempfile
 import threading
 import time
+import tkinter as tk
+from tkinter import simpledialog
+from urllib.parse import urlparse
 import wave
 from pathlib import Path
 
@@ -28,11 +34,11 @@ from pynput.keyboard import Controller as KBController
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 TRAY_CONFIG_PATH = Path(__file__).parent / "tray_config.json"
-LOG_PATH = Path(__file__).parent / "tray.log"
 
 TRAY_DEFAULTS = {
+    "server_url": None,       # e.g. "http://100.x.y.z:8787" — null = localhost from config.json
     "hotkey": "left ctrl+'",
-    "mic_device": None,      # clean device name (str) or None for system default
+    "mic_device": None,       # clean device name (str) or None for system default
     "sample_rate": 16000,
     "mode": "push_to_talk",   # "push_to_talk" or "toggle"
 }
@@ -75,13 +81,7 @@ def save_tray_config(cfg: dict):
 
 
 def log(msg: str):
-    line = f"{time.strftime('%H:%M:%S')} {msg}"
-    print(line)
-    try:
-        with open(LOG_PATH, "a") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    print(f"{time.strftime('%H:%M:%S')} {msg}")
 
 
 def _init_com():
@@ -228,14 +228,15 @@ def _build_device_attempts(device_name: str | None, sr: int) -> list[tuple]:
     return attempts
 
 
-def transcribe(audio_bytes: bytes, port: int) -> str:
-    url = (f"http://localhost:{port}/asr"
+def transcribe(session: requests.Session, audio_bytes: bytes, server_url: str,
+               filename: str = "audio.wav", mime: str = "audio/wav") -> str:
+    url = (f"{server_url}/asr"
            f"?encode=true&task=transcribe&language=en"
            f"&word_timestamps=false&output=txt")
-    resp = requests.post(
+    resp = session.post(
         url,
-        files={"audio_file": ("audio.wav", audio_bytes, "audio/wav")},
-        timeout=30,
+        files={"audio_file": (filename, audio_bytes, mime)},
+        timeout=(5, 30),
     )
     resp.raise_for_status()
     return resp.text.strip()
@@ -260,6 +261,7 @@ class RemoteVoiceTray:
         self.typer = KBController()
         self.actual_sr = 16000
         self._lock = threading.Lock()
+        self._http = requests.Session()
 
         # Scan-code tracking for push-to-talk (like Handy's rdev approach)
         self._pressed_scans: set[int] = set()
@@ -267,6 +269,11 @@ class RemoteVoiceTray:
         self._last_activate = 0.0
         self._combo_scan_sets: list[set[int]] = []
         self._parse_hotkey()
+
+        # Keepalive: ping server every 30s to keep Tailscale tunnel warm
+        self._keepalive_stop = threading.Event()
+        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+        self._keepalive_thread.start()
 
     # ---- Hotkey parsing & detection ----------------------------------------
 
@@ -336,6 +343,26 @@ class RemoteVoiceTray:
 
         except Exception as e:
             log(f"Key event error: {e}")
+
+    # ---- Keepalive -----------------------------------------------------------
+
+    def _keepalive_loop(self):
+        """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+        self._server_reachable = True
+        while not self._keepalive_stop.wait(30):
+            try:
+                server_url = self.tray_config.get("server_url")
+                if not server_url:
+                    port = self.server_config.get("server_port", 8787)
+                    server_url = f"http://localhost:{port}"
+                self._http.head(server_url, timeout=5)
+                if not self._server_reachable:
+                    log("Server connection restored")
+                    self._server_reachable = True
+            except Exception:
+                if self._server_reachable:
+                    log("Server unreachable — will keep retrying")
+                    self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
 
@@ -413,6 +440,30 @@ class RemoteVoiceTray:
         self.update_icon("blue")
         threading.Thread(target=self._process_audio, daemon=True).start()
 
+    def _compress_audio(self, wav_bytes: bytes) -> tuple[bytes, str, str]:
+        """Compress WAV to OGG/Opus via ffmpeg. Falls back to WAV."""
+        try:
+            wav_path = os.path.join(tempfile.gettempdir(), "rv_recording.wav")
+            ogg_path = os.path.join(tempfile.gettempdir(), "rv_recording.ogg")
+            with open(wav_path, "wb") as f:
+                f.write(wav_bytes)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path],
+                check=True, capture_output=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            with open(ogg_path, "rb") as f:
+                data = f.read()
+            log(f"Compressed: {len(wav_bytes)} -> {len(data)} bytes ({len(data)*100//len(wav_bytes)}%)")
+            os.unlink(wav_path)
+            os.unlink(ogg_path)
+            return data, "audio.ogg", "audio/ogg"
+        except FileNotFoundError:
+            log("ffmpeg not found, sending uncompressed WAV")
+        except Exception as e:
+            log(f"Compression failed: {e}")
+        return wav_bytes, "audio.wav", "audio/wav"
+
     def _process_audio(self):
         try:
             buf = io.BytesIO()
@@ -424,9 +475,36 @@ class RemoteVoiceTray:
                     wf.writeframes(frame.tobytes())
 
             audio_bytes = buf.getvalue()
-            port = self.server_config.get("server_port", 8787)
-            log(f"Sending {len(audio_bytes)} bytes...")
-            text = transcribe(audio_bytes, port)
+
+            server_url = self.tray_config.get("server_url")
+            if not server_url:
+                port = self.server_config.get("server_port", 8787)
+                server_url = f"http://localhost:{port}"
+
+            host = urlparse(server_url).hostname or ""
+            is_local = host in ("localhost", "127.0.0.1", "::1")
+            duration = sum(len(f) for f in self.frames) / self.actual_sr
+            if is_local or duration < 5:
+                filename, mime = "audio.wav", "audio/wav"
+            else:
+                audio_bytes, filename, mime = self._compress_audio(audio_bytes)
+
+            log(f"Sending {len(audio_bytes)} bytes ({filename}) to {server_url}...")
+
+            max_attempts = 3
+            text = None
+            for attempt in range(max_attempts):
+                try:
+                    text = transcribe(self._http, audio_bytes, server_url, filename, mime)
+                    break
+                except Exception as e:
+                    if attempt < max_attempts - 1:
+                        wait = 2 ** attempt  # 1s, 2s
+                        log(f"Attempt {attempt + 1} failed: {e} — retrying in {wait}s")
+                        time.sleep(wait)
+                    else:
+                        raise
+
             log(f"Result: {text[:120]}")
 
             if text:
@@ -523,6 +601,27 @@ class RemoteVoiceTray:
             ),
         )
 
+    def _set_server_url(self, icon, item):
+        """Open dialog to set server URL."""
+        root = tk.Tk()
+        root.withdraw()
+        current = self.tray_config.get("server_url") or ""
+        if not current:
+            port = self.server_config.get("server_port", 8787)
+            current = f"http://localhost:{port}"
+        result = simpledialog.askstring(
+            "Server URL",
+            "Enter server URL (e.g. http://100.x.y.z:8787):",
+            initialvalue=current,
+            parent=root,
+        )
+        root.destroy()
+        if result is not None:
+            result = result.strip()
+            self.tray_config["server_url"] = result if result else None
+            save_tray_config(self.tray_config)
+            log(f"Server URL -> {result!r}")
+
     def build_menu(self):
         hotkey = self.tray_config["hotkey"]
         mode = self.tray_config.get("mode", "push_to_talk")
@@ -533,6 +632,7 @@ class RemoteVoiceTray:
                 lambda: None, enabled=False,
             ),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Server URL...", self._set_server_url),
             pystray.MenuItem("Mode", self.get_mode_menu()),
             pystray.MenuItem("Microphone", self.get_mic_menu()),
             pystray.Menu.SEPARATOR,
@@ -540,6 +640,8 @@ class RemoteVoiceTray:
         )
 
     def quit(self, icon, item):
+        self._keepalive_stop.set()
+        self._http.close()
         keyboard.unhook_all()
         icon.stop()
 
@@ -563,10 +665,6 @@ class RemoteVoiceTray:
 
 
 def main():
-    try:
-        LOG_PATH.unlink(missing_ok=True)
-    except Exception:
-        pass
     RemoteVoiceTray().run()
 
 

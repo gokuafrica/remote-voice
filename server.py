@@ -113,6 +113,7 @@ def convert_to_wav(input_path: str) -> str:
         ["ffmpeg", "-y", "-i", input_path, "-ar", "16000", "-ac", "1", wav_path],
         capture_output=True,
         check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     return wav_path
 

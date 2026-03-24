@@ -209,7 +209,8 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 |-----------|------|-------------|
 | **Server** | `server.py` | Accepts audio, transcribes + cleans, returns text |
 | **Server GUI** | `gui.py` | Configure models, prompt, start/stop server, view logs |
-| **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app |
+| **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app. Supports remote servers over Tailscale |
+| **Mac Client** | `mac_tray.py` | macOS menu bar client — same as tray app but for Mac, connects to Windows server over Tailscale |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
 | **Tests** | `tests.py` | 103 tests covering regex pipeline + LLM deep format path |
 
@@ -293,7 +294,9 @@ Switch to the Whisper to Input keyboard in any app, tap the mic button, speak. T
 
 ### From Your PC
 
-Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Left Ctrl + '`) to record. Right-click the tray icon to select microphone and recording mode (push-to-talk or toggle).
+Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Left Ctrl + '`) to record. Right-click the tray icon to select microphone, recording mode (push-to-talk or toggle), and server URL.
+
+The tray app can connect to a remote server over Tailscale — right-click the tray icon and select **"Server URL..."** to enter the server's Tailscale IP (e.g. `http://100.x.y.z:8787`). By default, it connects to `localhost`. Audio is compressed via ffmpeg (OGG/Opus) before sending to reduce upload size over the network; if ffmpeg is not installed, it falls back to uncompressed WAV.
 
 ## Configuration
 
@@ -313,6 +316,7 @@ All settings are managed through the GUI (`Remote Voice.bat`), or by editing the
 
 | Setting | Description | Default |
 |---------|-------------|---------|
+| `server_url` | Server URL for remote connections (e.g. `http://100.x.y.z:8787`), or `null` for localhost | `null` |
 | `hotkey` | Global hotkey for recording | `left ctrl+'` |
 | `mic_device` | Microphone name (or null for system default) | `null` |
 | `sample_rate` | Audio sample rate (Hz) | `16000` |
