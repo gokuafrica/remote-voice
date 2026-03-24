@@ -170,6 +170,27 @@ The custom instruction is prefixed with "format:" and injected into the cleanup 
 | "The Eiffel Tower is in London. **deep format** check the facts" | `The Eiffel Tower is in Paris.` |
 | "hey can u come 2morrow. **deep format** make it formal" | `Can you come tomorrow?` |
 
+**Email formatting example** — dictate a stream-of-consciousness message and let the LLM add structure:
+
+> **You say:** "Hey Sarah thanks for the update on the deployment. Two things first the staging environment is ready and QA signed off on all the test cases. Second we found a minor bug in the payment flow where the discount code field doesn't clear after submission but Jake is already on it and should have a fix by end of day. Oh and one more thing can we schedule a quick sync tomorrow morning to go over the launch checklist? Let me know what time works for you. Thanks **deep format** like an email"
+
+> **You get:**
+> ```
+> Hey Sarah,
+>
+> Thanks for the update on the deployment.
+>
+> First, the staging environment is ready, and QA has signed off on all test cases.
+> Second, we found a minor bug in the payment flow where the discount code field
+> doesn't clear after submission. But Jake is already on it, and he should have
+> a fix by the end of the day.
+>
+> Oh, one more thing: can we schedule a quick sync tomorrow morning to go over
+> the launch checklist? Let me know what time works for you.
+>
+> Thanks
+> ```
+
 #### Known Quirks (qwen2.5:7b)
 
 - The LLM reliably handles clear corrections ("sorry I meant", "no wait", "I mean", "actually X"). `"Send it to John, no wait, Mike. deep format"` → `Send it to Mike.`
