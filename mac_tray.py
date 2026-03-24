@@ -176,7 +176,7 @@ def transcribe(session: requests.Session, audio_bytes: bytes, server_url: str,
     resp = session.post(
         url,
         files={"audio_file": (filename, audio_bytes, mime)},
-        timeout=(5, 30),  # 5s connect, 30s read
+        timeout=(5, 10),  # 5s connect, 10s read (server processes in <1s)
     )
     resp.raise_for_status()
     return resp.text.strip()
@@ -562,9 +562,19 @@ class RemoteVoiceMacTray(rumps.App):
                 try:
                     text = transcribe(self._http, audio_bytes, server_url, filename, mime)
                     break
+                except (ConnectionError, requests.ConnectionError) as e:
+                    # Stale TCP connection — reset session to force fresh handshake
+                    self._http.close()
+                    self._http = requests.Session()
+                    if attempt < max_attempts - 1:
+                        wait = 2 ** attempt
+                        log(f"Attempt {attempt + 1} failed (connection reset): {e} — fresh session, retrying in {wait}s")
+                        time.sleep(wait)
+                    else:
+                        raise
                 except Exception as e:
                     if attempt < max_attempts - 1:
-                        wait = 2 ** attempt  # 1s, 2s
+                        wait = 2 ** attempt
                         log(f"Attempt {attempt + 1} failed: {e} — retrying in {wait}s")
                         time.sleep(wait)
                     else:
