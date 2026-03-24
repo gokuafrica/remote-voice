@@ -248,7 +248,7 @@ Right-click `setup.bat` > "Run as administrator". This creates:
 The Mac client records audio via hotkey and sends it to the Windows server over Tailscale. No transcription runs on the Mac.
 
 ```bash
-brew install portaudio
+brew install portaudio ffmpeg
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements-mac.txt
