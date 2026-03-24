@@ -336,6 +336,38 @@ for attempt in range(max_attempts):
 
 ---
 
+### Feature 7: Remove Persistent Log File
+
+**Current behavior (tray.py lines 31, 77-84, 567):**
+- `LOG_PATH = Path(__file__).parent / "tray.log"` — log file path
+- `log()` function writes to both `print()` (stdout) and appends to the log file
+- `main()` deletes the log file on startup (`LOG_PATH.unlink(missing_ok=True)`)
+
+**Target behavior:**
+- Log only to stdout via `print()` — no file I/O
+- stdout doesn't accumulate on disk or in RAM (terminal manages its own scrollback)
+- Remove `LOG_PATH`, file writing in `log()`, and the `unlink()` call in `main()`
+
+**Changes:**
+
+1. Remove `LOG_PATH` constant (line 31)
+
+2. Simplify `log()` function (lines 77-84):
+   ```python
+   def log(msg: str):
+       print(f"{time.strftime('%H:%M:%S')} {msg}")
+   ```
+
+3. In `main()` (lines 566-570) — remove the log file deletion:
+   ```python
+   def main():
+       RemoteVoiceTray().run()
+   ```
+
+**Reference:** `mac_tray.py` — same change already applied there
+
+---
+
 ## What NOT to Change
 
 - **Hotkey system** — keep keyboard.hook + scan codes as-is

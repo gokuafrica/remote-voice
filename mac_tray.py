@@ -65,7 +65,6 @@ _MOD_FLAGS = {
 }
 
 TRAY_CONFIG_PATH = Path(__file__).parent / "mac_tray_config.json"
-LOG_PATH = Path(__file__).parent / "mac_tray.log"
 
 TRAY_DEFAULTS = {
     "server_url": "http://100.x.y.z:8787",
@@ -95,13 +94,7 @@ def save_tray_config(cfg: dict):
 
 
 def log(msg: str):
-    line = f"{time.strftime('%H:%M:%S')} {msg}"
-    print(line)
-    try:
-        with open(LOG_PATH, "a") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    print(f"{time.strftime('%H:%M:%S')} {msg}")
 
 
 def _set_clipboard(text: str) -> bool:
@@ -627,10 +620,6 @@ class RemoteVoiceMacTray(rumps.App):
 
 
 def main():
-    try:
-        LOG_PATH.unlink(missing_ok=True)
-    except Exception:
-        pass
     RemoteVoiceMacTray().run()
 
 
