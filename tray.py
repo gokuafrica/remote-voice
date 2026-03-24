@@ -361,7 +361,9 @@ class RemoteVoiceTray:
                     self._server_reachable = True
             except Exception:
                 if self._server_reachable:
-                    log("Server unreachable — will keep retrying")
+                    log("Server unreachable — resetting session, will keep retrying")
+                    self._http.close()
+                    self._http = requests.Session()
                     self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
@@ -497,9 +499,19 @@ class RemoteVoiceTray:
                 try:
                     text = transcribe(self._http, audio_bytes, server_url, filename, mime)
                     break
+                except (ConnectionError, requests.ConnectionError) as e:
+                    # Stale TCP connection — reset session to force fresh handshake
+                    self._http.close()
+                    self._http = requests.Session()
+                    if attempt < max_attempts - 1:
+                        wait = 2 ** attempt
+                        log(f"Attempt {attempt + 1} failed (connection reset): {e} — fresh session, retrying in {wait}s")
+                        time.sleep(wait)
+                    else:
+                        raise
                 except Exception as e:
                     if attempt < max_attempts - 1:
-                        wait = 2 ** attempt  # 1s, 2s
+                        wait = 2 ** attempt
                         log(f"Attempt {attempt + 1} failed: {e} — retrying in {wait}s")
                         time.sleep(wait)
                     else:
