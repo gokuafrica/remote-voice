@@ -42,9 +42,9 @@ Audio → Parakeet V2 (transcription) → apply_pronunciation_fixes() → check_
 All multi-word voice commands and spoken punctuation MUST handle Parakeet's behavior:
 
 1. **Commas/periods around commands** — Parakeet inserts punctuation at natural pauses. Use `[,.]?\s*` before and `[,.]?` or `[,.]?\s*` after command phrases.
-2. **Hyphens between words** — Parakeet may hyphenate multi-word phrases. Use `[\s-]+` instead of `\s+` between words in a command.
+2. **Commas/periods/hyphens between words** — Parakeet may insert commas, periods, or hyphens between words in a multi-word command. Use `[,.\s-]+` instead of `\s+` between words in a command. Exception: the `you know` filler uses `[\s-]+` (no commas) because "you, know" is likely meaningful speech.
 
-Example: `new line` → `r'[,.]?\s*\bnew[\s-]+line\b[,.]?\s*'`
+Example: `new line` → `r'[,.]?\s*\bnew[,.\s-]+line\b[,.]?\s*'`
 
 ## Testing
 

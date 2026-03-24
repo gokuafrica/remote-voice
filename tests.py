@@ -227,6 +227,7 @@ if run_regex:
     test("hello new line how are you", "Hello\nHow are you", "New line (no commas)")
     test("hello, new line, how are you", "Hello,\nHow are you", "New line (Parakeet commas)")
     test("hello, new-line, how are you", "Hello,\nHow are you", "New line (Parakeet hyphen)")
+    test("hello, new, line, how are you", "Hello,\nHow are you", "New line (Parakeet comma inside command)")
     test("first paragraph new paragraph second paragraph",
          "First paragraph.\n\nSecond paragraph", "New paragraph (no commas)")
     test("first paragraph, new paragraph, second paragraph",
@@ -246,6 +247,8 @@ if run_regex:
          "I need apples.", "Comma before command")
     test("I need apples. Get oranges, scratch-that.",
          "I need apples.", "Parakeet hyphen")
+    test("I need apples. Get oranges, scratch, that.",
+         "I need apples.", "Parakeet comma inside command")
     test("first line. New line second line. Scratch that third line.",
          "First line.\nThird line.", "Respects newline boundary")
     test("first para. New paragraph second para. Scratch that third para.",
@@ -287,6 +290,8 @@ if run_regex:
                  label="Trigger with Parakeet comma + period")
     test_trigger("hello world, deep-clean.", True, "hello world",
                  label="Trigger with Parakeet hyphen")
+    test_trigger("hello world, deep, clean.", True, "hello world",
+                 label="Trigger with Parakeet comma inside command")
     test_trigger("hello world. Deep clean", True, "hello world",
                  label="Trigger with period before")
     test_trigger("hello world", False, "hello world",
@@ -306,6 +311,9 @@ if run_regex:
     test_trigger("some text, deep-clean plus fix grammar.",
                  True, "some text", "fix grammar",
                  label="Instruction with Parakeet hyphen")
+    test_trigger("some text, deep, clean, plus. Format this like a viral tweet.",
+                 True, "some text", "Format this like a viral tweet",
+                 label="Instruction with Parakeet commas inside command")
     test_trigger("hello deep clean plus verify the dates and names",
                  True, "hello", "verify the dates and names",
                  label="Longer instruction")

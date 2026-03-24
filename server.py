@@ -69,7 +69,7 @@ def compile_pronunciation_fixes(fixes: dict) -> list[tuple[re.Pattern, str]]:
         words = wrong.strip().split()
         if not words:
             continue
-        regex = r'\b' + r'[\s-]+'.join(re.escape(w) for w in words) + r'\b'
+        regex = r'\b' + r'[,.\s-]+'.join(re.escape(w) for w in words) + r'\b'
         patterns.append((re.compile(regex, re.IGNORECASE), right))
     return patterns
 
@@ -173,31 +173,31 @@ async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 LLM_TRIGGER = re.compile(
-    r'[,.]?\s*\bdeep[\s-]+clean\b'          # "deep clean" command
-    r'(?:\s+plus[,.]?\s+(.+?))?'              # optional "plus <instruction>" (comma after plus OK)
+    r'[,.]?\s*\bdeep[,.\s-]+clean\b'         # "deep clean" command
+    r'(?:[,.\s]+plus[,.]?\s+(.+?))?'            # optional "plus <instruction>" (comma/period around plus OK)
     r'[,.]?\s*$',                             # trailing punct + end
     re.IGNORECASE,
 )
 
-START_OVER = re.compile(r'^.*[,.]?\s*\bstart[\s-]+over\b[,.]?\s*', re.IGNORECASE)
+START_OVER = re.compile(r'^.*[,.]?\s*\bstart[,.\s-]+over\b[,.]?\s*', re.IGNORECASE)
 
-SCRATCH_THAT = re.compile(r'[^.!?\n]*[,.]?[^\S\n]*\bscratch[\s-]+that\b[,.]?[^\S\n]*', re.IGNORECASE)
+SCRATCH_THAT = re.compile(r'[^.!?\n]*[,.]?[^\S\n]*\bscratch[,.\s-]+that\b[,.]?[^\S\n]*', re.IGNORECASE)
 
 FILLER_PATTERN = re.compile(r'\b(um|uh|you[\s-]+know)\b[,.]?\s*', re.IGNORECASE)
 
-NEW_PARAGRAPH = re.compile(r'[,.]?\s*\bnew[\s-]+paragraph\b[,.]?\s*', re.IGNORECASE)
-NEW_LINE = re.compile(r'([,.]?)\s*\bnew[\s-]+line\b[,.]?\s*', re.IGNORECASE)
+NEW_PARAGRAPH = re.compile(r'[,.]?\s*\bnew[,.\s-]+paragraph\b[,.]?\s*', re.IGNORECASE)
+NEW_LINE = re.compile(r'([,.]?)\s*\bnew[,.\s-]+line\b[,.]?\s*', re.IGNORECASE)
 
 SPOKEN_PUNCTUATION = [
     # Multi-word: consume leading space/punct only (preserve trailing space for natural flow)
-    (re.compile(r'[,.]?\s*\bquestion[\s-]+mark\b[,.]?', re.IGNORECASE), '? '),
-    (re.compile(r'[,.]?\s*\bexclamation[\s-]+point\b[,.]?', re.IGNORECASE), '! '),
-    (re.compile(r'[,.]?\s*\bopen[\s-]+parenthesis\b[,.]?\s*', re.IGNORECASE), ' ('),
-    (re.compile(r'[,.]?\s*\bclose[\s-]+parenthesis\b[,.]?\s*', re.IGNORECASE), ') '),
-    (re.compile(r'\s*\bdouble[\s-]+quote\b\s*', re.IGNORECASE), '"'),
-    (re.compile(r'\s*\bquotation[\s-]+mark\b\s*', re.IGNORECASE), '"'),
-    (re.compile(r'\s*\bsingle[\s-]+quote\b\s*', re.IGNORECASE), "'"),
-    (re.compile(r'[,.]?\s*\bpercent[\s-]+sign\b[,.]?', re.IGNORECASE), '% '),
+    (re.compile(r'[,.]?\s*\bquestion[,.\s-]+mark\b[,.]?', re.IGNORECASE), '? '),
+    (re.compile(r'[,.]?\s*\bexclamation[,.\s-]+point\b[,.]?', re.IGNORECASE), '! '),
+    (re.compile(r'[,.]?\s*\bopen[,.\s-]+parenthesis\b[,.]?\s*', re.IGNORECASE), ' ('),
+    (re.compile(r'[,.]?\s*\bclose[,.\s-]+parenthesis\b[,.]?\s*', re.IGNORECASE), ') '),
+    (re.compile(r'\s*\bdouble[,.\s-]+quote\b\s*', re.IGNORECASE), '"'),
+    (re.compile(r'\s*\bquotation[,.\s-]+mark\b\s*', re.IGNORECASE), '"'),
+    (re.compile(r'\s*\bsingle[,.\s-]+quote\b\s*', re.IGNORECASE), "'"),
+    (re.compile(r'[,.]?\s*\bpercent[,.\s-]+sign\b[,.]?', re.IGNORECASE), '% '),
     # Single-word: consume leading space, replacement includes trailing space where needed
     (re.compile(r'\s*\bcomma\b', re.IGNORECASE), ', '),
     (re.compile(r'\s*\bperiod\b[.]?', re.IGNORECASE), '. '),
@@ -219,8 +219,8 @@ NUMBER_WORDS = re.compile(
     re.IGNORECASE
 )
 
-BULLET_PATTERN = re.compile(r'[,.]?\s*\bbullet[\s-]+(\d+)\b[,.]?\s*', re.IGNORECASE)
-END_LIST = re.compile(r'[,.]?\s*\bend[\s-]+list\b[,.]?\s*', re.IGNORECASE)
+BULLET_PATTERN = re.compile(r'[,.]?\s*\bbullet[,.\s-]+(\d+)\b[,.]?\s*', re.IGNORECASE)
+END_LIST = re.compile(r'[,.]?\s*\bend[,.\s-]+list\b[,.]?\s*', re.IGNORECASE)
 
 
 def check_llm_trigger(text: str) -> tuple[bool, str, str]:
