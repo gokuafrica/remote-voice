@@ -173,7 +173,8 @@ def _build_device_attempts(device_name: str | None, sr: int) -> list[tuple]:
     return attempts
 
 
-def transcribe(audio_bytes: bytes, server_url: str) -> str:
+def transcribe(audio_bytes: bytes, server_url: str,
+               filename: str = "audio.wav", mime: str = "audio/wav") -> str:
     url = (
         f"{server_url}/asr"
         f"?encode=true&task=transcribe&language=en"
@@ -181,7 +182,7 @@ def transcribe(audio_bytes: bytes, server_url: str) -> str:
     )
     resp = requests.post(
         url,
-        files={"audio_file": ("audio.wav", audio_bytes, "audio/wav")},
+        files={"audio_file": (filename, audio_bytes, mime)},
         timeout=30,
     )
     resp.raise_for_status()
@@ -472,26 +473,48 @@ class RemoteVoiceMacTray(rumps.App):
         self.update_icon("blue")
         threading.Thread(target=self._process_audio, daemon=True).start()
 
+    def _compress_audio(self, wav_path: str) -> tuple[bytes, str, str]:
+        """Compress WAV to AAC via macOS afconvert. Falls back to WAV."""
+        try:
+            m4a_path = wav_path.replace(".wav", ".m4a")
+            subprocess.run(
+                ["afconvert", "-f", "m4af", "-d", "aac", "-b", "64000",
+                 wav_path, m4a_path],
+                check=True, capture_output=True, timeout=10,
+            )
+            with open(m4a_path, "rb") as f:
+                data = f.read()
+            wav_size = os.path.getsize(wav_path)
+            log(f"Compressed: {wav_size} -> {len(data)} bytes ({len(data)*100//wav_size}%)")
+            os.unlink(m4a_path)
+            return data, "audio.m4a", "audio/mp4"
+        except Exception as e:
+            log(f"Compression skipped ({e}), sending WAV")
+            with open(wav_path, "rb") as f:
+                return f.read(), "audio.wav", "audio/wav"
+
     def _process_audio(self):
         try:
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
+            wav_path = os.path.join(tempfile.gettempdir(), "rv_recording.wav")
+            with wave.open(wav_path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(self.actual_sr)
                 for frame in self.frames:
                     wf.writeframes(frame.tobytes())
 
-            audio_bytes = buf.getvalue()
+            audio_bytes, filename, mime = self._compress_audio(wav_path)
+            os.unlink(wav_path)
+
             server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
-            log(f"Sending {len(audio_bytes)} bytes to {server_url}...")
+            log(f"Sending {len(audio_bytes)} bytes ({filename}) to {server_url}...")
 
             # Retry with exponential backoff (handles brief Tailscale disconnects)
             max_attempts = 3
             text = None
             for attempt in range(max_attempts):
                 try:
-                    text = transcribe(audio_bytes, server_url)
+                    text = transcribe(audio_bytes, server_url, filename, mime)
                     break
                 except Exception as e:
                     if attempt < max_attempts - 1:
