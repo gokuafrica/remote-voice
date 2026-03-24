@@ -428,6 +428,7 @@ def lightweight_cleanup(text: str) -> str:
 async def process_audio(audio_bytes: bytes, filename: str) -> str:
     """Full pipeline: transcribe + regex cleanup + optional LLM."""
     t0 = time.perf_counter()
+    log.info(f"Received: {len(audio_bytes)} bytes, filename={filename}")
 
     raw_text = transcribe_audio(audio_bytes, filename)
     t1 = time.perf_counter()
