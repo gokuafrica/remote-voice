@@ -18,7 +18,7 @@ Phone or PC Mic
       |
       +-- Regex cleanup (fillers, numbers, punctuation, commands, <5ms)
       |
-      +-- [Optional] Ollama LLM (only when you say "deep clean")
+      +-- [Optional] Ollama LLM (only when you say "deep format")
       |
       v
   Cleaned text returned
@@ -27,7 +27,7 @@ Phone or PC Mic
       +-- PC: pasted into focused window via tray app hotkey
 ```
 
-By default, no LLM is used. Regex handles all deterministic cleanup tasks in under 5ms. You can explicitly invoke the LLM for semantic tasks (self-corrections, filler "like" disambiguation) by ending your dictation with **"deep clean"**.
+By default, no LLM is used. Regex handles all deterministic cleanup tasks in under 5ms. You can explicitly invoke the LLM for semantic tasks (self-corrections, filler "like" disambiguation) by ending your dictation with **"deep format"**.
 
 ## Voice Commands
 
@@ -104,7 +104,7 @@ The words "I" and "a" are never converted to numbers.
 
 ### Filler Words
 
-**um**, **uh**, and **you know** are automatically removed. The word **like** is deliberately *not* removed by regex because it can't distinguish filler ("it was like super hard") from verb ("I like this"). Use the **"deep clean"** command if you need filler "like" cleaned up.
+**um**, **uh**, and **you know** are automatically removed. The word **like** is deliberately *not* removed by regex because it can't distinguish filler ("it was like super hard") from verb ("I like this"). Use the **"deep format"** command if you need filler "like" cleaned up.
 
 ### Pronunciation Fixes
 
@@ -139,9 +139,9 @@ Configure fixes in the GUI under **Pronunciation Fixes** (format: `wrong = corre
 
 **Punctuation preserved before new line:** If Parakeet adds a period or comma before "new line", it is preserved. For example, `"end of sentence. New line next sentence"` produces `end of sentence.` followed by a line break, and `"Dear President, new line, hello"` produces `Dear President,` followed by a line break.
 
-### Deep Clean — LLM Post-Processing (Optional)
+### Deep Format — LLM Post-Processing (Optional)
 
-End your dictation with **"deep clean"** to route the text through the configured Ollama model after regex cleanup. The regex pipeline runs first (fillers, numbers, punctuation all handled), then the LLM receives already-cleaned text and only handles semantic tasks:
+End your dictation with **"deep format"** to route the text through the configured Ollama model after regex cleanup. The regex pipeline runs first (fillers, numbers, punctuation all handled), then the LLM receives already-cleaned text and only handles semantic tasks:
 
 - **Self-corrections**: "I need four, sorry, I meant two" → `I need 2`
 - **Filler "like" removal**: "I like this but like we should go" → `I like this, but we should go.`
@@ -150,28 +150,29 @@ End your dictation with **"deep clean"** to route the text through the configure
 
 #### Custom Instructions
 
-You can pass a custom instruction to the LLM by adding **"plus"** after "deep clean":
+Anything you say after **"deep format"** becomes a custom instruction to the LLM:
 
 | You say | What happens |
 |---------|-------------|
-| "...text **deep clean**" | Standard deep clean (self-corrections, filler removal, etc.) |
-| "...text **deep clean plus** check the math" | Deep clean + LLM also verifies the math |
-| "...text **deep clean plus** check the facts" | Deep clean + LLM also fact-checks the content |
-| "...text **deep clean plus** make it formal" | Deep clean + LLM also adjusts the tone |
+| "...text **deep format**" | Standard deep format (self-corrections, filler removal, etc.) |
+| "...text **deep format** check the math" | Deep format + LLM also verifies the math |
+| "...text **deep format** check the facts" | Deep format + LLM also fact-checks the content |
+| "...text **deep format** make it formal" | Deep format + LLM also adjusts the tone |
+| "...text **deep format** like an email" | Deep format + LLM also formats as an email |
 
-The custom instruction is injected into the cleanup prompt as an additional directive — the standard cleanup rules still apply. This means the LLM will clean the transcript *and* follow your instruction, without throwing away the conservative cleanup behavior that keeps transcriptions accurate. Without "plus", deep clean uses the standard cleanup prompt as before. We use "plus" instead of "with" because Parakeet mishears "with" as "wet" after "deep clean" (linguistic context bias).
+The custom instruction is prefixed with "format:" and injected into the cleanup prompt as an additional directive — the standard cleanup rules still apply. This means the LLM will clean the transcript *and* follow your instruction, without throwing away the conservative cleanup behavior that keeps transcriptions accurate.
 
 **Examples:**
 
 | You say | You get |
 |---------|---------|
-| "2 + 2 is 5. **deep clean plus** check the math" | `2 + 2 is 4.` |
-| "The Eiffel Tower is in London. **deep clean plus** check the facts" | `The Eiffel Tower is in Paris.` |
-| "hey can u come 2morrow. **deep clean plus** make it formal" | `Can you come tomorrow?` |
+| "2 + 2 is 5. **deep format** check the math" | `2 + 2 is 4.` |
+| "The Eiffel Tower is in London. **deep format** check the facts" | `The Eiffel Tower is in Paris.` |
+| "hey can u come 2morrow. **deep format** make it formal" | `Can you come tomorrow?` |
 
 #### Known Quirks (qwen2.5:7b)
 
-- The LLM reliably handles clear corrections ("sorry I meant", "no wait", "I mean", "actually X"). `"Send it to John, no wait, Mike. deep clean"` → `Send it to Mike.`
+- The LLM reliably handles clear corrections ("sorry I meant", "no wait", "I mean", "actually X"). `"Send it to John, no wait, Mike. deep format"` → `Send it to Mike.`
 - `"I'm sorry for the delay"` stays intact — the LLM correctly identifies this as a natural apology, not a self-correction.
 - However, the LLM sometimes over-corrects borderline cases. For example, it may remove a natural "actually" from `"I actually think this is great"` → `I think this is great.` This is the model being overly aggressive, not a pipeline bug.
 - Similarly, `"I'm sorry but X"` may get shortened to just `X` because "sorry + but" looks like a correction pattern to the model.
@@ -189,7 +190,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Server GUI** | `gui.py` | Configure models, prompt, start/stop server, view logs |
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 103 tests covering regex pipeline + LLM deep clean path |
+| **Tests** | `tests.py` | 103 tests covering regex pipeline + LLM deep format path |
 
 ## Setup
 
@@ -197,7 +198,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 
 - Windows 11 with NVIDIA GPU (tested on RTX 4070 Ti)
 - Python 3.10+
-- [Ollama](https://ollama.ai) running locally with a model (e.g. `ollama pull qwen2.5:7b`) — only needed if you plan to use the "deep clean" command
+- [Ollama](https://ollama.ai) running locally with a model (e.g. `ollama pull qwen2.5:7b`) — only needed if you plan to use the "deep format" command
 - [Tailscale](https://tailscale.com) (for phone access from anywhere)
 
 ### Install
@@ -258,7 +259,7 @@ All settings are managed through the GUI (`Remote Voice.bat`), or by editing the
 |---------|-------------|---------|
 | `server_port` | Server listening port | `8787` |
 | `ollama_url` | Ollama API URL | `http://localhost:11434` |
-| `ollama_model` | LLM for transcript cleanup (used only with "deep clean") | `qwen2.5:7b` |
+| `ollama_model` | LLM for transcript cleanup (used only with "deep format") | `qwen2.5:7b` |
 | `voice_model` | Speech-to-text model | `nemo-parakeet-tdt-0.6b-v2` |
 | `cleanup_prompt` | Instructions sent to the LLM when explicitly triggered | See config.json |
 
@@ -319,13 +320,13 @@ On RTX 4070 Ti with Parakeet V2:
 | Path | Latency | When |
 |------|---------|------|
 | Default (regex only) | ~0.3-0.5s | Every transcription |
-| With LLM (regex + Ollama) | ~5-20s | Only when you say "deep clean" |
+| With LLM (regex + Ollama) | ~5-20s | Only when you say "deep format" |
 
 The regex cleanup adds <5ms on top of transcription time. The LLM is kept loaded in VRAM (`keep_alive: -1`) to eliminate cold start delays when explicitly invoked.
 
 ## Testing
 
-The test suite lives in `tests.py` and covers both the regex pipeline (deterministic) and the LLM deep clean path (requires Ollama).
+The test suite lives in `tests.py` and covers both the regex pipeline (deterministic) and the LLM deep format path (requires Ollama).
 
 ```bash
 python tests.py              # Run all tests (regex + LLM)
@@ -333,9 +334,9 @@ python tests.py --regex-only # Regex tests only (no Ollama needed)
 python tests.py --llm-only   # LLM tests only
 ```
 
-**Part 1 — Regex tests (89 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep clean trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
+**Part 1 — Regex tests (89 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep format trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
 
-**Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep clean path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
+**Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep format path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 
 ## Contributing
 

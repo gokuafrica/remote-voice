@@ -173,8 +173,8 @@ async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 LLM_TRIGGER = re.compile(
-    r'[,.]?\s*\bdeep[,.\s-]+clean\b'         # "deep clean" command
-    r'(?:[,.\s]+plus[,.]?\s+(.+?))?'            # optional "plus <instruction>" (comma/period around plus OK)
+    r'[,.]?\s*\bdeep[,.\s-]+format\b'        # "deep format" command
+    r'(?:[,.\s]+(.+?))?'                      # optional instruction (anything after = custom prompt)
     r'[,.]?\s*$',                             # trailing punct + end
     re.IGNORECASE,
 )
@@ -224,16 +224,17 @@ END_LIST = re.compile(r'[,.]?\s*\bend[,.\s-]+list\b[,.]?\s*', re.IGNORECASE)
 
 
 def check_llm_trigger(text: str) -> tuple[bool, str, str]:
-    """Check if text ends with 'deep clean' command.
+    """Check if text ends with 'deep format' command.
 
     Returns (trigger, cleaned_text, instruction).
-    'instruction' is empty for plain 'deep clean', or the user's
-    custom instruction for 'deep clean with <instruction>'.
+    'instruction' is empty for plain 'deep format', or 'format: <text>'
+    when the user appends a custom instruction after 'deep format'.
     """
     m = LLM_TRIGGER.search(text)
     if m:
         cleaned = text[:m.start()].strip()
-        instruction = (m.group(1) or '').strip().rstrip('.,!?')
+        raw_instruction = (m.group(1) or '').strip().rstrip('.,!?')
+        instruction = f"format: {raw_instruction}" if raw_instruction else ""
         return True, cleaned, instruction
     return False, text, ""
 
@@ -439,7 +440,7 @@ async def process_audio(audio_bytes: bytes, filename: str) -> str:
     # Apply pronunciation fixes before any processing
     raw_text = apply_pronunciation_fixes(raw_text)
 
-    # Check for "deep clean" trigger before regex cleanup
+    # Check for "deep format" trigger before regex cleanup
     use_llm, text, instruction = check_llm_trigger(raw_text)
 
     # Always run regex cleanup first
@@ -447,18 +448,18 @@ async def process_audio(audio_bytes: bytes, filename: str) -> str:
     t2 = time.perf_counter()
     log.info(f"Regex cleanup: {t2 - t1:.4f}s | cleaned: {cleaned_text}")
 
-    # If user said "deep clean", also run through LLM
+    # If user said "deep format", also run through LLM
     if use_llm:
         if instruction:
-            log.info(f"Deep clean: YES — routing to LLM ({OLLAMA_MODEL}) with instruction: {instruction}")
+            log.info(f"Deep format: YES — routing to LLM ({OLLAMA_MODEL}) with instruction: {instruction}")
         else:
-            log.info(f"Deep clean: YES — routing to LLM ({OLLAMA_MODEL})")
+            log.info(f"Deep format: YES — routing to LLM ({OLLAMA_MODEL})")
         cleaned_text = await cleanup_with_ollama(cleaned_text, instruction)
         t3 = time.perf_counter()
         log.info(f"LLM cleanup: {t3 - t2:.2f}s | final: {cleaned_text}")
         log.info(f"Total: {t3 - t0:.2f}s (regex + LLM)")
     else:
-        log.info("Deep clean: NO (regex only)")
+        log.info("Deep format: NO (regex only)")
         log.info(f"Total: {t2 - t0:.2f}s")
 
     return cleaned_text

@@ -33,9 +33,9 @@ Audio → Parakeet V2 (transcription) → apply_pronunciation_fixes() → check_
 ```
 
 - `apply_pronunciation_fixes()` replaces known mispronunciations (from `config.json` `pronunciation_fixes`) before any other processing. Uses `[\s-]+` between words and `\b` word boundaries. Does NOT consume surrounding punctuation — downstream command regexes handle that.
-- `check_llm_trigger()` detects "deep clean" at end of text. Returns `(trigger: bool, text: str, instruction: str)`.
+- `check_llm_trigger()` detects "deep format" at end of text. Returns `(trigger: bool, text: str, instruction: str)`. Anything after "deep format" becomes the instruction, prefixed with "format: ".
 - `lightweight_cleanup()` runs all regex in this order: start over, fillers, spoken punctuation, period cleanup, duplicate comma collapse, quote spacing, new paragraph/line, scratch that, number conversion, numbered lists, final capitalization/spacing. Note: new paragraph/line runs BEFORE scratch that so that scratch that respects line/paragraph boundaries (stops at `\n`).
-- `cleanup_with_ollama()` only runs when the user explicitly says "deep clean". Accepts an optional custom instruction via "deep clean plus <instruction>".
+- `cleanup_with_ollama()` only runs when the user explicitly says "deep format". Accepts an optional custom instruction: anything said after "deep format" becomes the instruction.
 
 ## Regex Pattern Conventions
 
@@ -71,7 +71,7 @@ python tests.py --llm-only   # LLM tests only
 - **Parakeet's punctuation is trusted** — do not force trailing periods.
 - **"like" is NOT removed by regex** — it requires semantic understanding (LLM only).
 - **Self-corrections are NOT handled by regex** — false positive risk too high. LLM only.
-- **`cleanup_with_ollama()` is never called automatically** — only via explicit "deep clean" trigger.
+- **`cleanup_with_ollama()` is never called automatically** — only via explicit "deep format" trigger.
 - **`keep_alive: -1`** in the Ollama API call — keeps the model in VRAM to eliminate cold starts.
 
 ## Config Sync Points

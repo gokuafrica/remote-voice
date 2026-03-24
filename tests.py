@@ -3,7 +3,7 @@ Test suite for Remote Voice pipeline.
 
 Part 1 — Regex tests: deterministic, no external dependencies.
 Part 2 — LLM tests: require Ollama running with the configured model.
-                     These simulate the full "deep clean" path (regex + LLM)
+                     These simulate the full "deep format" path (regex + LLM)
                      and verify the LLM handles semantic tasks correctly.
 
 Run all:        python tests.py
@@ -60,7 +60,7 @@ def test(input_text, expected, label=""):
 
 def test_trigger(input_text, expected_trigger, expected_text,
                  expected_instruction="", label=""):
-    """Test the deep clean trigger detection."""
+    """Test the deep format trigger detection."""
     global passed, failed, section_passed, section_failed
     trigger, text, instruction = check_llm_trigger(input_text)
     if (trigger == expected_trigger and text == expected_text
@@ -77,8 +77,8 @@ def test_trigger(input_text, expected_trigger, expected_text,
         print(f"    Got:      trigger={trigger}, text={text!r}, instruction={instruction!r}")
 
 
-async def deep_clean(input_text):
-    """Simulate the full deep clean path: trigger detection -> regex -> LLM."""
+async def deep_format(input_text):
+    """Simulate the full deep format path: trigger detection -> regex -> LLM."""
     _, stripped, instruction = check_llm_trigger(input_text)
     regex_cleaned = lightweight_cleanup(stripped)
     llm_result = await cleanup_with_ollama(regex_cleaned, instruction)
@@ -87,7 +87,7 @@ async def deep_clean(input_text):
 
 def test_llm(input_text, must_contain=None, must_not_contain=None,
              exact=None, label=""):
-    """Test the full deep clean pipeline (regex + LLM).
+    """Test the full deep format pipeline (regex + LLM).
 
     LLM output is non-deterministic, so we check properties:
       must_contain:     list of strings that MUST appear in the output
@@ -98,7 +98,7 @@ def test_llm(input_text, must_contain=None, must_not_contain=None,
     must_contain = must_contain or []
     must_not_contain = must_not_contain or []
 
-    result = asyncio.run(deep_clean(input_text))
+    result = asyncio.run(deep_format(input_text))
     result_lower = result.lower()
 
     errors = []
@@ -283,45 +283,39 @@ if run_regex:
          "He dodged the bullet 3 times.", "False positive: 'bullet N' but no 'end list'")
 
     # -------------------------------------------------------------------
-    section("Deep Clean Trigger Detection")
-    test_trigger("hello world deep clean", True, "hello world",
+    section("Deep Format Trigger Detection")
+    test_trigger("hello world deep format", True, "hello world",
                  label="Basic trigger")
-    test_trigger("hello world, deep clean.", True, "hello world",
+    test_trigger("hello world, deep format.", True, "hello world",
                  label="Trigger with Parakeet comma + period")
-    test_trigger("hello world, deep-clean.", True, "hello world",
+    test_trigger("hello world, deep-format.", True, "hello world",
                  label="Trigger with Parakeet hyphen")
-    test_trigger("hello world, deep, clean.", True, "hello world",
+    test_trigger("hello world, deep, format.", True, "hello world",
                  label="Trigger with Parakeet comma inside command")
-    test_trigger("hello world. Deep clean", True, "hello world",
+    test_trigger("hello world. Deep format", True, "hello world",
                  label="Trigger with period before")
     test_trigger("hello world", False, "hello world",
                  label="No trigger present")
-    test_trigger("I need to deep clean the house later", False,
-                 "I need to deep clean the house later",
-                 label="Not a trigger: 'deep clean' not at end")
 
     # -------------------------------------------------------------------
-    section("Deep Clean Plus Custom Instruction")
-    test_trigger("two plus two is five deep clean plus check the math",
-                 True, "two plus two is five", "check the math",
+    section("Deep Format Custom Instruction")
+    test_trigger("two plus two is five deep format check the math",
+                 True, "two plus two is five", "format: check the math",
                  label="Trigger with instruction")
-    test_trigger("some text, deep clean plus make it formal.",
-                 True, "some text", "make it formal",
+    test_trigger("some text, deep format make it formal.",
+                 True, "some text", "format: make it formal",
                  label="Instruction with Parakeet comma + period")
-    test_trigger("some text, deep-clean plus fix grammar.",
-                 True, "some text", "fix grammar",
+    test_trigger("some text, deep-format fix grammar.",
+                 True, "some text", "format: fix grammar",
                  label="Instruction with Parakeet hyphen")
-    test_trigger("some text, deep, clean, plus. Format this like a viral tweet.",
-                 True, "some text", "Format this like a viral tweet",
+    test_trigger("some text, deep, format. Format this like a viral tweet.",
+                 True, "some text", "format: Format this like a viral tweet",
                  label="Instruction with Parakeet commas inside command")
-    test_trigger("hello deep clean plus verify the dates and names",
-                 True, "hello", "verify the dates and names",
+    test_trigger("hello deep format verify the dates and names",
+                 True, "hello", "format: verify the dates and names",
                  label="Longer instruction")
-    test_trigger("hello deep clean", True, "hello", "",
-                 label="No 'plus' — instruction is empty")
-    test_trigger("some text. Deep clean plus, make it formal.",
-                 True, "some text", "make it formal",
-                 label="Parakeet comma after 'plus'")
+    test_trigger("hello deep format", True, "hello", "",
+                 label="No instruction — empty")
 
     # -------------------------------------------------------------------
     section("Pronunciation Fixes")
@@ -414,7 +408,7 @@ if run_regex:
 # =======================================================================
 if run_llm:
     print("\n" + "=" * 60)
-    print("PART 2: LLM PIPELINE TESTS (deep clean)")
+    print("PART 2: LLM PIPELINE TESTS (deep format)")
     print(f"  Model: {OLLAMA_MODEL} @ {OLLAMA_URL}")
     print("=" * 60 + "\n")
 
@@ -427,25 +421,25 @@ if run_llm:
         # ---------------------------------------------------------------
         section("Self-Corrections")
         test_llm(
-            "1 + 1 is 4, sorry I meant 2. deep clean",
+            "1 + 1 is 4, sorry I meant 2. deep format",
             must_contain=["2"],
             must_not_contain=["4", "sorry", "meant"],
             label="Number correction with 'sorry I meant'",
         )
         test_llm(
-            "Send it to John, no wait, Mike. deep clean",
+            "Send it to John, no wait, Mike. deep format",
             must_contain=["Mike"],
             must_not_contain=["John", "no wait"],
             label="Name correction with 'no wait'",
         )
         test_llm(
-            "The meeting is Monday, actually Tuesday. deep clean",
+            "The meeting is Monday, actually Tuesday. deep format",
             must_contain=["Tuesday"],
             must_not_contain=["Monday"],
             label="Correction with 'actually'",
         )
         test_llm(
-            "I need the red one, I mean the blue one. deep clean",
+            "I need the red one, I mean the blue one. deep format",
             must_contain=["blue"],
             must_not_contain=["red", "I mean"],
             label="Correction with 'I mean'",
@@ -454,12 +448,12 @@ if run_llm:
         # ---------------------------------------------------------------
         section("Natural Usage Preserved (Not Corrections)")
         test_llm(
-            "I'm sorry for the delay. deep clean",
+            "I'm sorry for the delay. deep format",
             must_contain=["sorry", "delay"],
             label="Natural 'sorry' kept intact",
         )
         test_llm(
-            "I actually think this is great. deep clean",
+            "I actually think this is great. deep format",
             must_contain=["great"],
             must_not_contain=["sorry", "meant"],
             label="Natural 'actually' — meaning preserved",
@@ -468,19 +462,19 @@ if run_llm:
         # ---------------------------------------------------------------
         section("Filler 'like' Removal")
         test_llm(
-            "I like this but like we should go. deep clean",
+            "I like this but like we should go. deep format",
             must_contain=["like this"],
             must_not_contain=["but like"],
             label="Filler 'like' removed, verb 'like' kept",
         )
         test_llm(
-            "It was like super hard to do. deep clean",
+            "It was like super hard to do. deep format",
             must_not_contain=["like"],
             must_contain=["super hard"],
             label="Filler 'like' removed from sentence",
         )
         test_llm(
-            "I like pizza. deep clean",
+            "I like pizza. deep format",
             must_contain=["like pizza"],
             label="Verb 'like' preserved",
         )
@@ -488,7 +482,7 @@ if run_llm:
         # ---------------------------------------------------------------
         section("Restatements")
         test_llm(
-            "We should go to the park, or rather, let's go to the beach. deep clean",
+            "We should go to the park, or rather, let's go to the beach. deep format",
             must_contain=["beach"],
             must_not_contain=["park", "rather"],
             label="Restatement keeps final version",
@@ -497,27 +491,27 @@ if run_llm:
         # ---------------------------------------------------------------
         section("Regex + LLM Combined")
         test_llm(
-            "Um I need like twenty five no wait thirty dollars. deep clean",
+            "Um I need like twenty five no wait thirty dollars. deep format",
             must_contain=["30"],
             must_not_contain=["um", "25", "no wait"],
             label="Fillers removed by regex, correction by LLM, numbers converted",
         )
 
         # ---------------------------------------------------------------
-        section("Deep Clean Plus Custom Instruction")
+        section("Deep Format Custom Instruction")
         test_llm(
-            "2 + 2 is 5. deep clean plus check the math",
+            "2 + 2 is 5. deep format check the math",
             must_not_contain=["2 + 2 is 5"],
             label="Math check instruction",
         )
         test_llm(
-            "The Eiffel Tower is in London. deep clean plus check the facts",
+            "The Eiffel Tower is in London. deep format check the facts",
             must_contain=["Paris"],
             must_not_contain=["London"],
             label="Fact check instruction",
         )
         test_llm(
-            "hey can u come 2morrow. deep clean plus make it formal",
+            "hey can u come 2morrow. deep format make it formal",
             must_not_contain=["hey"],
             label="Formality instruction",
         )

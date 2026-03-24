@@ -7,6 +7,9 @@
     "pronunciation_fixes": {
         "new lion": "new line",
         "coma": "comma",
-        "endless": "end list"
+        "endless": "end list",
+        "deepformat": "deep format",
+        "lnm": "LMM",
+        "lmn": "LMM"
     }
 }
