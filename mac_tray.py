@@ -519,8 +519,6 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _process_audio(self):
         try:
-            t0 = time.perf_counter()
-
             wav_path = os.path.join(tempfile.gettempdir(), "rv_recording.wav")
             with wave.open(wav_path, "wb") as wf:
                 wf.setnchannels(1)
@@ -529,14 +527,8 @@ class RemoteVoiceMacTray(rumps.App):
                 for frame in self.frames:
                     wf.writeframes(frame.tobytes())
 
-            t1 = time.perf_counter()
-            log(f"[timing] WAV encode: {t1 - t0:.2f}s")
-
             audio_bytes, filename, mime = self._compress_audio(wav_path)
             os.unlink(wav_path)
-
-            t2 = time.perf_counter()
-            log(f"[timing] Compress: {t2 - t1:.2f}s")
 
             server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
             log(f"Sending {len(audio_bytes)} bytes ({filename}) to {server_url}...")
@@ -556,9 +548,6 @@ class RemoteVoiceMacTray(rumps.App):
                     else:
                         raise
 
-            t3 = time.perf_counter()
-            log(f"[timing] Server round-trip: {t3 - t2:.2f}s")
-            log(f"[timing] Total (encode+compress+server): {t3 - t0:.2f}s")
             log(f"Result: {text[:120]}")
 
             if text:
