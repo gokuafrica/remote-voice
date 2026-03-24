@@ -411,7 +411,9 @@ class RemoteVoiceMacTray(rumps.App):
                     self._server_reachable = True
             except Exception:
                 if self._server_reachable:
-                    log("Server unreachable — will keep retrying")
+                    log("Server unreachable — resetting session, will keep retrying")
+                    self._http.close()
+                    self._http = requests.Session()
                     self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
