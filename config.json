@@ -9,7 +9,11 @@
         "coma": "comma",
         "endless": "end list",
         "deepformat": "deep format",
-        "lnm": "LMM",
-        "lmn": "LMM"
+        "d format": "deep format",
+        "deformat": "deep format",
+        "lnm": "LLM",
+        "lmn": "LLM",
+        "lln": "LLM",
+        "czech": "check"
     }
 }

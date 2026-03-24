@@ -319,6 +319,9 @@ if run_regex:
     test_trigger("100 minus 10 is 9000. Deep format? Check the math.",
                  True, "100 minus 10 is 9000", "format: Check the math",
                  label="Parakeet question mark after trigger")
+    test_trigger("Alexander the Great died in India. Deep format: check historical facts.",
+                 True, "Alexander the Great died in India", "format: check historical facts",
+                 label="Parakeet colon after trigger")
 
     # -------------------------------------------------------------------
     section("Pronunciation Fixes")
