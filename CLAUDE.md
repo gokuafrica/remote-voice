@@ -74,6 +74,10 @@ python tests.py --llm-only   # LLM tests only
 - **`cleanup_with_ollama()` is never called automatically** — only via explicit "deep format" trigger.
 - **`keep_alive: -1`** in the Ollama API call — keeps the model in VRAM to eliminate cold starts.
 
+## Implementation Plans
+
+Implementation plans (`IMPLEMENTATION_PLAN_*.md`) are temporary documents used to hand off work to other agents. Every implementation plan **must include a self-destruct instruction**: the agent implementing the plan must delete the plan file from the repo after the work is complete and verified. This prevents stale planning documents from being committed into the repository.
+
 ## Config Sync Points
 
 These must stay in sync when the LLM prompt changes:
