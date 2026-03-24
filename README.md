@@ -243,6 +243,31 @@ Right-click `setup.bat` > "Run as administrator". This creates:
 - A Windows Firewall rule for port 8787
 - A scheduled task to auto-start the server at login
 
+### Mac Client Setup
+
+The Mac client records audio via hotkey and sends it to the Windows server over Tailscale. No transcription runs on the Mac.
+
+```bash
+brew install portaudio
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements-mac.txt
+python mac_tray.py
+```
+
+Each new terminal session, activate the venv before running:
+```bash
+source venv/bin/activate
+python mac_tray.py
+```
+
+On first run, click the menu bar icon and select **"Server URL..."** to enter your Windows PC's Tailscale IP (e.g. `http://100.x.y.z:8787`).
+
+**Required macOS permissions** (System Settings > Privacy & Security):
+- **Accessibility** — add Terminal.app (for hotkey suppression and paste simulation)
+- **Input Monitoring** — add Terminal.app (for global hotkey detection)
+- **Microphone** — prompted automatically on first recording
+
 ### Phone Setup
 
 1. Install [whisper-to-input APK](https://github.com/j3soon/whisper-to-input/releases)

@@ -25,11 +25,44 @@ from PIL import Image, ImageDraw
 from pynput.keyboard import Controller as KBController, Key, KeyCode, Listener
 from Quartz import (
     CGEventCreateKeyboardEvent,
+    CGEventGetFlags,
+    CGEventGetIntegerValueField,
     CGEventPost,
     CGEventSetFlags,
+    CGEventTapCreate,
+    CGEventTapEnable,
+    CFMachPortCreateRunLoopSource,
+    CFRunLoopAddSource,
+    CFRunLoopGetCurrent,
+    kCFRunLoopCommonModes,
     kCGEventFlagMaskCommand,
+    kCGEventFlagMaskControl,
+    kCGEventFlagMaskAlternate,
+    kCGEventFlagMaskShift,
+    kCGEventKeyDown,
+    kCGEventKeyUp,
     kCGHIDEventTap,
+    kCGKeyboardEventKeycode,
+    kCGSessionEventTap,
+    kCGTailAppendEventTap,
 )
+
+# macOS virtual keycodes for hotkey suppression
+_MAC_KEYCODES = {
+    "'": 39, ";": 41, "`": 50, "\\": 42, "/": 44,
+    ",": 43, ".": 47, "-": 27, "=": 24,
+    "a": 0, "b": 11, "c": 8, "d": 2, "e": 14, "f": 3,
+    "g": 5, "h": 4, "i": 34, "j": 38, "k": 40, "l": 37,
+    "m": 46, "n": 45, "o": 31, "p": 35, "q": 12, "r": 15,
+    "s": 1, "t": 17, "u": 32, "v": 9, "w": 13, "x": 7,
+    "y": 16, "z": 6,
+}
+_MOD_FLAGS = {
+    "cmd": kCGEventFlagMaskCommand,
+    "ctrl": kCGEventFlagMaskControl,
+    "alt": kCGEventFlagMaskAlternate,
+    "shift": kCGEventFlagMaskShift,
+}
 
 TRAY_CONFIG_PATH = Path(__file__).parent / "mac_tray_config.json"
 LOG_PATH = Path(__file__).parent / "mac_tray.log"
@@ -214,10 +247,13 @@ class RemoteVoiceMacTray(rumps.App):
             rumps.MenuItem("Quit", callback=self._quit),
         ]
 
-        # Keyboard listener
+        # Keyboard listener (pynput detects hotkey)
         self._listener = Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()
         log("Keyboard listener started")
+
+        # CGEvent tap suppresses hotkey keystrokes from reaching active app
+        self._setup_key_suppression()
 
         # First-run check
         if not TRAY_CONFIG_PATH.exists() or self.tray_config.get("server_url") == TRAY_DEFAULTS["server_url"]:
@@ -259,6 +295,48 @@ class RemoteVoiceMacTray(rumps.App):
     def update_icon(self, color):
         path = self._icon_paths.get(color, self._icon_paths["gray"])
         self.icon = path
+
+    # ---- Hotkey suppression (CGEvent tap) ------------------------------------
+
+    def _setup_key_suppression(self):
+        """Create a CGEvent tap to suppress hotkey keystrokes from reaching apps.
+
+        pynput can't suppress events on macOS — it only monitors. Without this,
+        holding Cmd+' for push-to-talk types '''''... into the active app.
+        The tap runs after pynput's listener so detection still works.
+        """
+        keycode = _MAC_KEYCODES.get(self._hotkey_key)
+        mod_flag = _MOD_FLAGS.get(self._hotkey_mod)
+        if keycode is None or mod_flag is None:
+            log(f"Cannot suppress hotkey: unknown key={self._hotkey_key!r} or mod={self._hotkey_mod!r}")
+            return
+
+        def tap_callback(proxy, event_type, event, refcon):
+            if event_type in (kCGEventKeyDown, kCGEventKeyUp):
+                kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
+                flags = CGEventGetFlags(event)
+                if kc == keycode and (flags & mod_flag):
+                    return None  # suppress
+            return event
+
+        event_mask = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
+        tap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGTailAppendEventTap,  # after pynput's tap so detection still works
+            0,  # active tap (can suppress events)
+            event_mask,
+            tap_callback,
+            None,
+        )
+        if tap:
+            source = CFMachPortCreateRunLoopSource(None, tap, 0)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes)
+            CGEventTapEnable(tap, True)
+            self._event_tap = tap  # prevent garbage collection
+            self._event_tap_source = source
+            log("Hotkey suppression tap installed")
+        else:
+            log("WARNING: Could not create event tap — hotkey may leak to active app")
 
     # ---- Key tracking (pynput) ----------------------------------------------
 
