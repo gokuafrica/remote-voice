@@ -173,17 +173,17 @@ def _build_device_attempts(device_name: str | None, sr: int) -> list[tuple]:
     return attempts
 
 
-def transcribe(audio_bytes: bytes, server_url: str,
+def transcribe(session: requests.Session, audio_bytes: bytes, server_url: str,
                filename: str = "audio.wav", mime: str = "audio/wav") -> str:
     url = (
         f"{server_url}/asr"
         f"?encode=true&task=transcribe&language=en"
         f"&word_timestamps=false&output=txt"
     )
-    resp = requests.post(
+    resp = session.post(
         url,
         files={"audio_file": (filename, audio_bytes, mime)},
-        timeout=30,
+        timeout=(5, 30),  # 5s connect, 30s read
     )
     resp.raise_for_status()
     return resp.text.strip()
@@ -206,6 +206,7 @@ class RemoteVoiceMacTray(rumps.App):
         self.typer = KBController()
         self.actual_sr = 16000
         self._lock = threading.Lock()
+        self._http = requests.Session()  # persistent connection to server
 
         # Key tracking for pynput
         self._pressed_keys: set = set()
@@ -263,6 +264,11 @@ class RemoteVoiceMacTray(rumps.App):
                 title="Welcome to Remote Voice!",
                 message="Set your Windows PC's Tailscale IP via the 'Server URL...' menu item.",
             )
+
+        # Keepalive: ping server every 30s to keep Tailscale tunnel warm
+        self._keepalive_stop = threading.Event()
+        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+        self._keepalive_thread.start()
 
         hotkey = f"{self._hotkey_mod}+{self._hotkey_key}"
         log(f"Starting: hotkey='{hotkey}', mode={mode}")
@@ -397,6 +403,17 @@ class RemoteVoiceMacTray(rumps.App):
                     threading.Thread(target=self._do_stop, daemon=True).start()
         except Exception as e:
             log(f"Key release error: {e}")
+
+    # ---- Keepalive -----------------------------------------------------------
+
+    def _keepalive_loop(self):
+        """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+        while not self._keepalive_stop.wait(30):
+            try:
+                server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
+                self._http.head(server_url, timeout=5)
+            except Exception:
+                pass  # silent — server may be offline
 
     # ---- Recording ----------------------------------------------------------
 
@@ -538,7 +555,7 @@ class RemoteVoiceMacTray(rumps.App):
             text = None
             for attempt in range(max_attempts):
                 try:
-                    text = transcribe(audio_bytes, server_url, filename, mime)
+                    text = transcribe(self._http, audio_bytes, server_url, filename, mime)
                     break
                 except Exception as e:
                     if attempt < max_attempts - 1:
@@ -602,7 +619,9 @@ class RemoteVoiceMacTray(rumps.App):
         log(f"Mic -> {name!r}")
 
     def _quit(self, sender):
+        self._keepalive_stop.set()
         self._listener.stop()
+        self._http.close()
         log("Quitting")
         rumps.quit_application()
 
