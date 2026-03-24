@@ -316,6 +316,9 @@ if run_regex:
                  label="Longer instruction")
     test_trigger("hello deep format", True, "hello", "",
                  label="No instruction — empty")
+    test_trigger("100 minus 10 is 9000. Deep format? Check the math.",
+                 True, "100 minus 10 is 9000", "format: Check the math",
+                 label="Parakeet question mark after trigger")
 
     # -------------------------------------------------------------------
     section("Pronunciation Fixes")
