@@ -401,12 +401,18 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _keepalive_loop(self):
         """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+        self._server_reachable = True  # assume connected at start
         while not self._keepalive_stop.wait(30):
             try:
                 server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
                 self._http.head(server_url, timeout=5)
+                if not self._server_reachable:
+                    log("Server connection restored")
+                    self._server_reachable = True
             except Exception:
-                pass  # silent — server may be offline
+                if self._server_reachable:
+                    log("Server unreachable — will keep retrying")
+                    self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
 

@@ -189,10 +189,11 @@ for attempt in range(max_attempts):
    self._keepalive_thread.start()
    ```
 
-2. Add keepalive method to the class:
+2. Add keepalive method to the class (log only on state changes — not every ping):
    ```python
    def _keepalive_loop(self):
        """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+       self._server_reachable = True
        while not self._keepalive_stop.wait(30):
            try:
                server_url = self.tray_config.get("server_url")
@@ -200,8 +201,13 @@ for attempt in range(max_attempts):
                    port = self.server_config.get("server_port", 8787)
                    server_url = f"http://localhost:{port}"
                self._http.head(server_url, timeout=5)
+               if not self._server_reachable:
+                   log("Server connection restored")
+                   self._server_reachable = True
            except Exception:
-               pass
+               if self._server_reachable:
+                   log("Server unreachable — will keep retrying")
+                   self._server_reachable = False
    ```
 
 3. In `quit()` — stop keepalive:
