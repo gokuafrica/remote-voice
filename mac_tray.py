@@ -485,7 +485,22 @@ class RemoteVoiceMacTray(rumps.App):
             audio_bytes = buf.getvalue()
             server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
             log(f"Sending {len(audio_bytes)} bytes to {server_url}...")
-            text = transcribe(audio_bytes, server_url)
+
+            # Retry with exponential backoff (handles brief Tailscale disconnects)
+            max_attempts = 3
+            text = None
+            for attempt in range(max_attempts):
+                try:
+                    text = transcribe(audio_bytes, server_url)
+                    break
+                except Exception as e:
+                    if attempt < max_attempts - 1:
+                        wait = 2 ** attempt  # 1s, 2s
+                        log(f"Attempt {attempt + 1} failed: {e} — retrying in {wait}s")
+                        time.sleep(wait)
+                    else:
+                        raise
+
             log(f"Result: {text[:120]}")
 
             if text:
