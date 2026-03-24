@@ -176,7 +176,7 @@ def transcribe(session: requests.Session, audio_bytes: bytes, server_url: str,
     resp = session.post(
         url,
         files={"audio_file": (filename, audio_bytes, mime)},
-        timeout=(5, 10),  # 5s connect, 10s read (server processes in <1s)
+        timeout=(5, 15),  # 5s connect, 15s read
     )
     resp.raise_for_status()
     return resp.text.strip()
