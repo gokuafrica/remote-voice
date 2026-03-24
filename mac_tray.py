@@ -189,15 +189,27 @@ class RemoteVoiceMacTray(rumps.App):
         mode = self.tray_config.get("mode", "push_to_talk")
         mode_label = "hold" if mode == "push_to_talk" else "toggle"
 
+        mode_menu = rumps.MenuItem("Mode")
+        mode_menu[" Push to Talk (hold hotkey)"] = rumps.MenuItem(
+            "Push to Talk (hold hotkey)", callback=self._set_push_to_talk
+        )
+        mode_menu["Toggle (press twice)"] = rumps.MenuItem(
+            "Toggle (press twice)", callback=self._set_toggle
+        )
+
+        mic_menu = rumps.MenuItem("Microphone")
+        mic_menu["System Default"] = rumps.MenuItem(
+            "System Default", callback=self._select_mic
+        )
+        for name in get_unique_devices():
+            mic_menu[name] = rumps.MenuItem(name, callback=self._select_mic)
+
         self.menu = [
-            rumps.MenuItem(f"Hotkey: {hotkey_display} ({mode_label})", callback=None),
+            rumps.MenuItem(f"Hotkey: {hotkey_display} ({mode_label})"),
             None,
             rumps.MenuItem("Server URL...", callback=self._set_server_url),
-            rumps.MenuItem("Mode", [
-                rumps.MenuItem("Push to Talk (hold hotkey)", callback=self._set_push_to_talk),
-                rumps.MenuItem("Toggle (press twice)", callback=self._set_toggle),
-            ]),
-            rumps.MenuItem("Microphone", self._build_mic_menu()),
+            mode_menu,
+            mic_menu,
             None,
             rumps.MenuItem("Quit", callback=self._quit),
         ]
@@ -448,13 +460,6 @@ class RemoteVoiceMacTray(rumps.App):
         self.tray_config["mic_device"] = name
         save_tray_config(self.tray_config)
         log(f"Mic -> {name!r}")
-
-    def _build_mic_menu(self):
-        device_names = get_unique_devices()
-        items = [rumps.MenuItem("System Default", callback=self._select_mic)]
-        for name in device_names:
-            items.append(rumps.MenuItem(name, callback=self._select_mic))
-        return items
 
     def _quit(self, sender):
         self._listener.stop()
