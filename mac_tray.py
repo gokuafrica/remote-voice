@@ -474,24 +474,48 @@ class RemoteVoiceMacTray(rumps.App):
         threading.Thread(target=self._process_audio, daemon=True).start()
 
     def _compress_audio(self, wav_path: str) -> tuple[bytes, str, str]:
-        """Compress WAV to AAC via macOS afconvert. Falls back to WAV."""
+        """Compress WAV before sending. Tries ffmpeg (Opus), afconvert (AAC), falls back to WAV."""
+        wav_size = os.path.getsize(wav_path)
+
+        # Try ffmpeg → OGG/Opus (best compression for speech, ~10-20x smaller)
+        try:
+            ogg_path = wav_path.replace(".wav", ".ogg")
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path],
+                check=True, capture_output=True, timeout=10,
+            )
+            with open(ogg_path, "rb") as f:
+                data = f.read()
+            log(f"Compressed (Opus): {wav_size} -> {len(data)} bytes ({len(data)*100//wav_size}%)")
+            os.unlink(ogg_path)
+            return data, "audio.ogg", "audio/ogg"
+        except FileNotFoundError:
+            log("ffmpeg not found, trying afconvert")
+        except Exception as e:
+            log(f"ffmpeg failed: {e}")
+
+        # Try afconvert → M4A/AAC (macOS built-in)
         try:
             m4a_path = wav_path.replace(".wav", ".m4a")
-            subprocess.run(
-                ["afconvert", "-f", "m4af", "-d", "aac", "-b", "64000",
-                 wav_path, m4a_path],
+            result = subprocess.run(
+                ["afconvert", "-f", "m4af", "-d", "aac", wav_path, m4a_path],
                 check=True, capture_output=True, timeout=10,
             )
             with open(m4a_path, "rb") as f:
                 data = f.read()
-            wav_size = os.path.getsize(wav_path)
-            log(f"Compressed: {wav_size} -> {len(data)} bytes ({len(data)*100//wav_size}%)")
+            log(f"Compressed (AAC): {wav_size} -> {len(data)} bytes ({len(data)*100//wav_size}%)")
             os.unlink(m4a_path)
             return data, "audio.m4a", "audio/mp4"
         except Exception as e:
-            log(f"Compression skipped ({e}), sending WAV")
-            with open(wav_path, "rb") as f:
-                return f.read(), "audio.wav", "audio/wav"
+            stderr = getattr(e, "stderr", b"")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="replace")
+            log(f"afconvert failed: {e} | stderr: {stderr}")
+
+        # Fall back to WAV
+        log("Sending uncompressed WAV")
+        with open(wav_path, "rb") as f:
+            return f.read(), "audio.wav", "audio/wav"
 
     def _process_audio(self):
         try:
