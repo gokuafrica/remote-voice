@@ -311,12 +311,20 @@ class RemoteVoiceMacTray(rumps.App):
             log(f"Cannot suppress hotkey: unknown key={self._hotkey_key!r} or mod={self._hotkey_mod!r}")
             return
 
+        self._last_hotkey_suppress = 0.0
+
         def tap_callback(proxy, event_type, event, refcon):
             if event_type in (kCGEventKeyDown, kCGEventKeyUp):
                 kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
                 flags = CGEventGetFlags(event)
+                # Suppress when modifier held (normal case)
                 if kc == keycode and (flags & mod_flag):
-                    return None  # suppress
+                    self._last_hotkey_suppress = time.monotonic()
+                    return None
+                # Suppress straggler keyup within 500ms (Cmd released before ')
+                if kc == keycode and event_type == kCGEventKeyUp:
+                    if time.monotonic() - self._last_hotkey_suppress < 0.5:
+                        return None
             return event
 
         event_mask = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
@@ -491,6 +499,21 @@ class RemoteVoiceMacTray(rumps.App):
         self.update_icon("blue")
         threading.Thread(target=self._process_audio, daemon=True).start()
 
+    def _run_encoder(self, cmd: list[str], timeout: int = 10) -> bool:
+        """Run an audio encoder subprocess with proper timeout and cleanup."""
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc.wait(timeout=timeout)
+            if proc.returncode != 0:
+                raise subprocess.CalledProcessError(proc.returncode, cmd[0])
+            return True
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        except FileNotFoundError:
+            raise
+
     def _compress_audio(self, wav_path: str) -> tuple[bytes, str, str]:
         """Compress WAV before sending. Tries ffmpeg (Opus), afconvert (AAC), falls back to WAV."""
         wav_size = os.path.getsize(wav_path)
@@ -498,9 +521,8 @@ class RemoteVoiceMacTray(rumps.App):
         # Try ffmpeg → OGG/Opus (best compression for speech, ~10-20x smaller)
         try:
             ogg_path = wav_path.replace(".wav", ".ogg")
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path],
-                check=True, capture_output=True, timeout=10,
+            self._run_encoder(
+                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path]
             )
             with open(ogg_path, "rb") as f:
                 data = f.read()
@@ -515,9 +537,8 @@ class RemoteVoiceMacTray(rumps.App):
         # Try afconvert → M4A/AAC (macOS built-in)
         try:
             m4a_path = wav_path.replace(".wav", ".m4a")
-            result = subprocess.run(
-                ["afconvert", "-f", "m4af", "-d", "aac", wav_path, m4a_path],
-                check=True, capture_output=True, timeout=10,
+            self._run_encoder(
+                ["afconvert", "-f", "m4af", "-d", "aac", wav_path, m4a_path]
             )
             with open(m4a_path, "rb") as f:
                 data = f.read()
@@ -525,10 +546,7 @@ class RemoteVoiceMacTray(rumps.App):
             os.unlink(m4a_path)
             return data, "audio.m4a", "audio/mp4"
         except Exception as e:
-            stderr = getattr(e, "stderr", b"")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="replace")
-            log(f"afconvert failed: {e} | stderr: {stderr}")
+            log(f"afconvert failed: {e}")
 
         # Fall back to WAV
         log("Sending uncompressed WAV")
