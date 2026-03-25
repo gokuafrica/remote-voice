@@ -200,6 +200,7 @@ class RemoteVoiceMacTray(rumps.App):
         self.actual_sr = 16000
         self._lock = threading.Lock()
         self._http = requests.Session()  # persistent connection to server
+        self._keepalive_http = requests.Session()  # separate session for keepalive (thread safety)
 
         # Key tracking for pynput
         self._pressed_keys: set = set()
@@ -408,20 +409,18 @@ class RemoteVoiceMacTray(rumps.App):
     # ---- Keepalive -----------------------------------------------------------
 
     def _keepalive_loop(self):
-        """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+        """Ping server every 30s to keep Tailscale tunnel warm."""
         self._server_reachable = True  # assume connected at start
         while not self._keepalive_stop.wait(30):
             try:
                 server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
-                self._http.head(server_url, timeout=5)
+                self._keepalive_http.head(server_url, timeout=5)
                 if not self._server_reachable:
                     log("Server connection restored")
                     self._server_reachable = True
             except Exception:
                 if self._server_reachable:
-                    log("Server unreachable — resetting session, will keep retrying")
-                    self._http.close()
-                    self._http = requests.Session()
+                    log("Server unreachable — will keep retrying")
                     self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
@@ -666,6 +665,7 @@ class RemoteVoiceMacTray(rumps.App):
         self._keepalive_stop.set()
         self._listener.stop()
         self._http.close()
+        self._keepalive_http.close()
         log("Quitting")
         rumps.quit_application()
 
