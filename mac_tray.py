@@ -483,12 +483,21 @@ class RemoteVoiceMacTray(rumps.App):
         log(f"Rec stop ({len(self.frames)} frames)")
 
         if self.stream:
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception:
-                pass
+            stream = self.stream
             self.stream = None
+
+            def _close():
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_close, daemon=True)
+            t.start()
+            t.join(timeout=2)
+            if t.is_alive():
+                log("WARNING: stream close timed out — continuing anyway")
 
         if not self.frames:
             log("No audio captured")
