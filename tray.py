@@ -19,8 +19,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import tkinter as tk
-from tkinter import simpledialog
 from urllib.parse import urlparse
 import wave
 from pathlib import Path
@@ -270,10 +268,28 @@ class RemoteVoiceTray:
         self._combo_scan_sets: list[set[int]] = []
         self._parse_hotkey()
 
-        # Keepalive: ping server every 30s to keep Tailscale tunnel warm
+        # Keepalive: ping server every 30s to keep Tailscale tunnel warm (remote only)
         self._keepalive_stop = threading.Event()
-        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
-        self._keepalive_thread.start()
+        if not self._is_server_local():
+            self._keepalive_http = requests.Session()
+            self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+            self._keepalive_thread.start()
+        else:
+            self._keepalive_http = None
+            self._keepalive_thread = None
+
+    def _resolve_server_url(self) -> str:
+        """Return the effective server URL."""
+        url = self.tray_config.get("server_url")
+        if not url:
+            port = self.server_config.get("server_port", 8787)
+            url = f"http://localhost:{port}"
+        return url
+
+    def _is_server_local(self) -> bool:
+        """Check if the server URL points to this machine."""
+        host = urlparse(self._resolve_server_url()).hostname or ""
+        return host in ("localhost", "127.0.0.1", "::1")
 
     # ---- Hotkey parsing & detection ----------------------------------------
 
@@ -347,23 +363,17 @@ class RemoteVoiceTray:
     # ---- Keepalive -----------------------------------------------------------
 
     def _keepalive_loop(self):
-        """Ping server every 30s to keep Tailscale tunnel and HTTP connection warm."""
+        """Ping server every 30s to keep Tailscale tunnel warm. Only runs for remote servers."""
         self._server_reachable = True
         while not self._keepalive_stop.wait(30):
             try:
-                server_url = self.tray_config.get("server_url")
-                if not server_url:
-                    port = self.server_config.get("server_port", 8787)
-                    server_url = f"http://localhost:{port}"
-                self._http.head(server_url, timeout=5)
+                self._keepalive_http.head(self._resolve_server_url(), timeout=5)
                 if not self._server_reachable:
                     log("Server connection restored")
                     self._server_reachable = True
             except Exception:
                 if self._server_reachable:
-                    log("Server unreachable — resetting session, will keep retrying")
-                    self._http.close()
-                    self._http = requests.Session()
+                    log("Server unreachable — will keep retrying")
                     self._server_reachable = False
 
     # ---- Recording ----------------------------------------------------------
@@ -477,14 +487,8 @@ class RemoteVoiceTray:
                     wf.writeframes(frame.tobytes())
 
             audio_bytes = buf.getvalue()
-
-            server_url = self.tray_config.get("server_url")
-            if not server_url:
-                port = self.server_config.get("server_port", 8787)
-                server_url = f"http://localhost:{port}"
-
-            host = urlparse(server_url).hostname or ""
-            is_local = host in ("localhost", "127.0.0.1", "::1")
+            server_url = self._resolve_server_url()
+            is_local = self._is_server_local()
             duration = sum(len(f) for f in self.frames) / self.actual_sr
             if is_local or duration < 5:
                 filename, mime = "audio.wav", "audio/wav"
@@ -615,12 +619,11 @@ class RemoteVoiceTray:
 
     def _set_server_url(self, icon, item):
         """Open dialog to set server URL."""
+        import tkinter as tk
+        from tkinter import simpledialog
         root = tk.Tk()
         root.withdraw()
-        current = self.tray_config.get("server_url") or ""
-        if not current:
-            port = self.server_config.get("server_port", 8787)
-            current = f"http://localhost:{port}"
+        current = self.tray_config.get("server_url") or self._resolve_server_url()
         result = simpledialog.askstring(
             "Server URL",
             "Enter server URL (e.g. http://100.x.y.z:8787):",
@@ -654,6 +657,8 @@ class RemoteVoiceTray:
     def quit(self, icon, item):
         self._keepalive_stop.set()
         self._http.close()
+        if self._keepalive_http:
+            self._keepalive_http.close()
         keyboard.unhook_all()
         icon.stop()
 
