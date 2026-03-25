@@ -563,6 +563,8 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _process_audio(self):
         try:
+            t_start = time.perf_counter()
+
             wav_path = os.path.join(tempfile.gettempdir(), "rv_recording.wav")
             with wave.open(wav_path, "wb") as wf:
                 wf.setnchannels(1)
@@ -571,13 +573,20 @@ class RemoteVoiceMacTray(rumps.App):
                 for frame in self.frames:
                     wf.writeframes(frame.tobytes())
 
+            t_wav = time.perf_counter()
+            log(f"[timing] WAV build: {t_wav - t_start:.3f}s")
+
             duration = sum(len(f) for f in self.frames) / self.actual_sr
             if duration < 5:
                 with open(wav_path, "rb") as f:
                     audio_bytes = f.read()
                 filename, mime = "audio.wav", "audio/wav"
+                t_compress = time.perf_counter()
+                log(f"[timing] Compression: skipped (<5s audio)")
             else:
                 audio_bytes, filename, mime = self._compress_audio(wav_path)
+                t_compress = time.perf_counter()
+                log(f"[timing] Compression: {t_compress - t_wav:.3f}s")
             os.unlink(wav_path)
 
             server_url = self.tray_config.get("server_url", TRAY_DEFAULTS["server_url"])
@@ -608,18 +617,28 @@ class RemoteVoiceMacTray(rumps.App):
                     else:
                         raise
 
+            t_server = time.perf_counter()
+            log(f"[timing] Server round-trip: {t_server - t_compress:.3f}s")
             log(f"Result: {text[:120]}")
 
             if text:
                 # Ensure modifier keys from hotkey are fully released
                 time.sleep(0.3)
+                t_wait = time.perf_counter()
+                log(f"[timing] Key release wait: {t_wait - t_server:.3f}s")
                 if _set_clipboard(text):
                     time.sleep(0.05)
                     _paste()
+                    t_paste = time.perf_counter()
+                    log(f"[timing] Clipboard + paste: {t_paste - t_wait:.3f}s")
                     log("Pasted via clipboard")
                 else:
                     log("Clipboard failed — falling back to typing")
                     self.typer.type(text)
+                    t_paste = time.perf_counter()
+
+            t_end = time.perf_counter()
+            log(f"[timing] Total end-to-end: {t_end - t_start:.3f}s")
 
             self.update_icon("green")
             time.sleep(0.5)
