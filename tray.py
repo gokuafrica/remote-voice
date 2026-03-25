@@ -279,11 +279,18 @@ class RemoteVoiceTray:
             self._keepalive_thread = None
 
     def _resolve_server_url(self) -> str:
-        """Return the effective server URL."""
+        """Return the effective server URL.
+
+        Rewrites 'localhost' to '127.0.0.1' to avoid the IPv6 penalty on
+        Windows (server listens on 0.0.0.0/IPv4; connecting to ::1 first
+        causes a ~2s timeout before falling back to 127.0.0.1).
+        """
         url = self.tray_config.get("server_url")
         if not url:
             port = self.server_config.get("server_port", 8787)
-            url = f"http://localhost:{port}"
+            url = f"http://127.0.0.1:{port}"
+        else:
+            url = url.replace("://localhost", "://127.0.0.1")
         return url
 
     def _is_server_local(self) -> bool:
