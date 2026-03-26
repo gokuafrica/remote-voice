@@ -342,6 +342,13 @@ Body: file=<audio bytes>, model=parakeet, response_format=json
 Response: {"text": "..."}
 ```
 
+**Keepalive / root**:
+```
+HEAD /  or  GET /
+Response: "ok" (200)
+```
+Used by tray apps to keep Tailscale tunnels warm.
+
 **Health check**:
 ```
 GET /health

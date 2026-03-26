@@ -90,6 +90,16 @@ def apply_pronunciation_fixes(text: str) -> str:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("remote-voice")
 
+
+class _HideKeepalive(logging.Filter):
+    """Suppress noisy HEAD / keepalive lines from uvicorn access log."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return '"HEAD / HTTP' not in msg and '"GET / HTTP' not in msg
+
+
+logging.getLogger("uvicorn.access").addFilter(_HideKeepalive())
+
 model = None
 
 
@@ -503,6 +513,13 @@ async def transcribe_openai(
     if response_format == "text":
         return PlainTextResponse(cleaned_text)
     return JSONResponse(content={"text": cleaned_text})
+
+
+@app.head("/")
+@app.get("/")
+async def root():
+    """Lightweight endpoint for keepalive pings from tray apps."""
+    return PlainTextResponse("ok")
 
 
 @app.get("/health")

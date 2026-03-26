@@ -14,6 +14,7 @@
         "lnm": "LLM",
         "lmn": "LLM",
         "lln": "LLM",
-        "czech": "check"
+        "czech": "check",
+        "startover": "start over"
     }
 }
