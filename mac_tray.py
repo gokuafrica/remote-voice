@@ -199,8 +199,9 @@ class RemoteVoiceMacTray(rumps.App):
         self.typer = KBController()
         self.actual_sr = 16000
         self._lock = threading.Lock()
-        self._http = requests.Session()  # persistent connection to server
-        self._keepalive_http = requests.Session()  # separate session for keepalive (thread safety)
+        self._http = requests.Session()
+        self._http.headers["Connection"] = "close"  # fresh TCP per request (no stale connections)
+        self._keepalive_http = requests.Session()  # separate session for keepalive
 
         # Key tracking for pynput
         self._pressed_keys: set = set()
@@ -445,6 +446,11 @@ class RemoteVoiceMacTray(rumps.App):
             self._stop_recording()
 
     def _start_recording(self):
+        # Kill any orphaned streams from a previous timed-out close
+        try:
+            sd.stop()
+        except Exception:
+            pass
         self.frames = []
         device_name = self.tray_config.get("mic_device")
         sr = self.tray_config.get("sample_rate", 16000)
@@ -584,22 +590,13 @@ class RemoteVoiceMacTray(rumps.App):
             log(f"Sending {len(audio_bytes)} bytes ({filename}) to {server_url}...")
 
             # Retry with exponential backoff (handles brief Tailscale disconnects)
+            # Each attempt uses a fresh TCP connection (Connection: close header)
             max_attempts = 3
             text = None
             for attempt in range(max_attempts):
                 try:
                     text = transcribe(self._http, audio_bytes, server_url, filename, mime)
                     break
-                except (ConnectionError, requests.ConnectionError) as e:
-                    # Stale TCP connection — reset session to force fresh handshake
-                    self._http.close()
-                    self._http = requests.Session()
-                    if attempt < max_attempts - 1:
-                        wait = 2 ** attempt
-                        log(f"Attempt {attempt + 1} failed (connection reset): {e} — fresh session, retrying in {wait}s")
-                        time.sleep(wait)
-                    else:
-                        raise
                 except Exception as e:
                     if attempt < max_attempts - 1:
                         wait = 2 ** attempt
