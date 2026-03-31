@@ -16,6 +16,8 @@ Every change to the pipeline must update all three in the same commit:
 
 Do not merge or commit a change that updates code without corresponding test and documentation updates. If a regex pattern changes, the test for that pattern must change. If a voice command is added, the README must list it.
 
+**README is user-facing, not developer-facing.** Document what users can do and what they experience — features, voice commands, configuration options, setup steps. Do NOT document internal implementation details (error recovery mechanisms, retry logic, internal architecture decisions). If a change is invisible to the user, it does not belong in the README.
+
 ## Project Architecture
 
 - `server.py` — FastAPI server. Contains the full pipeline: transcription (Parakeet V2) → regex cleanup (`lightweight_cleanup()`) → optional LLM (`cleanup_with_ollama()`). All regex patterns and voice command logic live here.
