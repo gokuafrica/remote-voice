@@ -395,10 +395,6 @@ python tests.py --llm-only   # LLM tests only
 
 **Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep format path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 
-## Reliability
-
-**CUDA context recovery:** On Windows, the TDR (Timeout Detection and Recovery) mechanism can reset the GPU driver — typically triggered by the PC waking from sleep, a brief GPU hang, or power management. This invalidates the CUDA context in all running processes, causing `CUDA failure 999` errors. The server detects this and automatically reloads the Parakeet model (~5s) and retries the request. No manual restart required.
-
 ## Contributing
 
 Every change must update **code, tests, and docs together** in the same commit:
