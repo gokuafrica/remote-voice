@@ -129,7 +129,13 @@ def convert_to_wav(input_path: str) -> str:
 
 
 def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
-    """Save audio, convert to WAV if needed, run Parakeet V2."""
+    """Save audio, convert to WAV if needed, run Parakeet V2.
+
+    Handles CUDA error 999 (Windows TDR GPU driver reset) by reloading
+    the model once and retrying. TDR invalidates the CUDA context in all
+    running processes — a fresh model load creates a new context.
+    """
+    global model
     suffix = os.path.splitext(filename)[1] or ".wav"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     wav_path = None
@@ -143,7 +149,15 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
         else:
             recognize_path = tmp.name
 
-        return str(model.recognize(recognize_path))
+        try:
+            return str(model.recognize(recognize_path))
+        except Exception as e:
+            if "CUDA failure 999" in str(e) or "ONNXRuntimeError" in str(e):
+                log.warning(f"CUDA context lost ({e.__class__.__name__}) — reloading model and retrying...")
+                model = onnx_asr.load_model(VOICE_MODEL)
+                log.info("Model reloaded successfully.")
+                return str(model.recognize(recognize_path))
+            raise
     finally:
         os.unlink(tmp.name)
         if wav_path and os.path.exists(wav_path):
