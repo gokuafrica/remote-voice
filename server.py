@@ -236,6 +236,64 @@ SPOKEN_PUNCTUATION = [
     (re.compile(r'\s*\bapostrophe\b\s*', re.IGNORECASE), "'"),
 ]
 
+# ---------------------------------------------------------------------------
+# Emoji patterns
+# Replacement includes surrounding spaces (' 😊 ') because [,.]?\s* before
+# the command consumes the leading space; the final cleanup collapses any
+# double-spaces that result.
+#
+# Two-word phrases (e.g. "smiley face") use [,.\s-]+ between words to handle
+# Parakeet inserting a comma, period, or hyphen at the pause.
+#
+# Ambiguous single words (heart, fire, star, …) require an explicit "emoji"
+# suffix so common English words are never accidentally converted.
+# ---------------------------------------------------------------------------
+
+EMOJI_PATTERNS = [
+    # ── Faces ──────────────────────────────────────────────────────────────
+    (re.compile(r'[,.]?\s*\bsmiley[,.\s-]+face\b[,.]?',    re.IGNORECASE), ' 😊 '),
+    (re.compile(r'[,.]?\s*\blaughing[,.\s-]+face\b[,.]?',  re.IGNORECASE), ' 😂 '),
+    (re.compile(r'[,.]?\s*\bwinking[,.\s-]+face\b[,.]?',   re.IGNORECASE), ' 😉 '),
+    (re.compile(r'[,.]?\s*\bthinking[,.\s-]+face\b[,.]?',  re.IGNORECASE), ' 🤔 '),
+    (re.compile(r'[,.]?\s*\braised[,.\s-]+eyebrow\b[,.]?', re.IGNORECASE), ' 🤨 '),
+    (re.compile(r'[,.]?\s*\bface[,.\s-]+palm\b[,.]?',      re.IGNORECASE), ' 🤦 '),
+    (re.compile(r'[,.]?\s*\bfacepalm\b[,.]?',              re.IGNORECASE), ' 🤦 '),
+    (re.compile(r'[,.]?\s*\beye[,.\s-]+roll\b[,.]?',       re.IGNORECASE), ' 🙄 '),
+    # ── Hands ──────────────────────────────────────────────────────────────
+    (re.compile(r'[,.]?\s*\bthumbs[,.\s-]+up\b[,.]?',       re.IGNORECASE), ' 👍 '),
+    (re.compile(r'[,.]?\s*\bthumbs[,.\s-]+down\b[,.]?',     re.IGNORECASE), ' 👎 '),
+    (re.compile(r'[,.]?\s*\bclapping[,.\s-]+hands\b[,.]?',  re.IGNORECASE), ' 👏 '),
+    (re.compile(r'[,.]?\s*\bwaving[,.\s-]+hand\b[,.]?',     re.IGNORECASE), ' 👋 '),
+    (re.compile(r'[,.]?\s*\bcrossed[,.\s-]+fingers\b[,.]?', re.IGNORECASE), ' 🤞 '),
+    (re.compile(r'[,.]?\s*\bfolded[,.\s-]+hands\b[,.]?',    re.IGNORECASE), ' 🙏 '),
+    (re.compile(r'[,.]?\s*\bok[,.\s-]+hand\b[,.]?',         re.IGNORECASE), ' 👌 '),
+    (re.compile(r'[,.]?\s*\bpeace[,.\s-]+sign\b[,.]?',      re.IGNORECASE), ' ✌️ '),
+    # ── Symbols ────────────────────────────────────────────────────────────
+    (re.compile(r'[,.]?\s*\bcheck[,.\s-]+mark\b[,.]?',      re.IGNORECASE), ' ✅ '),
+    (re.compile(r'[,.]?\s*\bred[,.\s-]+x\b[,.]?',           re.IGNORECASE), ' ❌ '),
+    (re.compile(r'[,.]?\s*\bparty[,.\s-]+popper\b[,.]?',    re.IGNORECASE), ' 🎉 '),
+    (re.compile(r'[,.]?\s*\bbroken[,.\s-]+heart\b[,.]?',    re.IGNORECASE), ' 💔 '),
+    # ── Require "emoji" suffix (ambiguous standalone words) ────────────────
+    (re.compile(r'[,.]?\s*\bshrug[,.\s-]+emoji\b[,.]?',     re.IGNORECASE), ' 🤷 '),
+    (re.compile(r'[,.]?\s*\bmuscle[,.\s-]+emoji\b[,.]?',    re.IGNORECASE), ' 💪 '),
+    (re.compile(r'[,.]?\s*\bsparkles[,.\s-]+emoji\b[,.]?',  re.IGNORECASE), ' ✨ '),
+    (re.compile(r'[,.]?\s*\brocket[,.\s-]+emoji\b[,.]?',    re.IGNORECASE), ' 🚀 '),
+    (re.compile(r'[,.]?\s*\bskull[,.\s-]+emoji\b[,.]?',     re.IGNORECASE), ' 💀 '),
+    (re.compile(r'[,.]?\s*\bpoop[,.\s-]+emoji\b[,.]?',      re.IGNORECASE), ' 💩 '),
+    (re.compile(r'[,.]?\s*\bheart[,.\s-]+emoji\b[,.]?',     re.IGNORECASE), ' ❤️ '),
+    (re.compile(r'[,.]?\s*\bfire[,.\s-]+emoji\b[,.]?',      re.IGNORECASE), ' 🔥 '),
+    (re.compile(r'[,.]?\s*\bstar[,.\s-]+emoji\b[,.]?',      re.IGNORECASE), ' ⭐ '),
+    (re.compile(r'[,.]?\s*\bhundred[,.\s-]+emoji\b[,.]?',   re.IGNORECASE), ' 💯 '),
+]
+
+
+def apply_emoji_patterns(text: str) -> str:
+    """Replace spoken emoji phrases with their Unicode emoji characters."""
+    for pattern, emoji_char in EMOJI_PATTERNS:
+        text = pattern.sub(emoji_char, text)
+    return text
+
+
 NUMBER_WORDS = re.compile(
     r'\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|'
     r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|'
@@ -406,6 +464,14 @@ def lightweight_cleanup(text: str) -> str:
     text = SCRATCH_THAT.sub(' ', text).strip()
     if not text:
         return ""
+
+    # 8.5. Convert spoken emoji phrases to emoji characters
+    # Per-line to prevent [,.\s-]+ from matching across line breaks.
+    # Must run BEFORE number conversion: "hundred emoji" would otherwise
+    # become "100 emoji" first and never match the emoji pattern.
+    lines = text.split('\n')
+    lines = [apply_emoji_patterns(line) for line in lines]
+    text = '\n'.join(lines)
 
     # 9. Convert number words to digits
     # Process each line separately to preserve newlines

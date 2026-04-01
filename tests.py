@@ -283,6 +283,38 @@ if run_regex:
          "He dodged the bullet 3 times.", "False positive: 'bullet N' but no 'end list'")
 
     # -------------------------------------------------------------------
+    section("Emoji Substitution")
+    # Basic triggers
+    test("thumbs up", "👍", "thumbs up — standalone")
+    test("Great work thumbs up", "Great work 👍", "thumbs up — end of phrase")
+    test("smiley face", "😊", "smiley face — standalone")
+    test("That was funny laughing face", "That was funny 😂", "laughing face")
+    test("heart emoji", "❤️", "heart emoji — ambiguous word needs suffix")
+    test("fire emoji", "🔥", "fire emoji — ambiguous word needs suffix")
+    test("hundred emoji", "💯", "hundred emoji — runs before number conversion")
+
+    # facepalm: one-word and two-word variants
+    test("facepalm", "🤦", "facepalm — one word")
+    test("face palm", "🤦", "face palm — two words")
+    test("face-palm", "🤦", "face-palm — Parakeet hyphen in command")
+
+    # Parakeet punctuation between command words
+    test("thumbs, up", "👍", "thumbs, up — Parakeet comma between words")
+    test("smiley. face", "😊", "smiley. face — Parakeet period between words")
+
+    # Parakeet punctuation before the command
+    test("Great work, thumbs up", "Great work 👍", "leading Parakeet comma before command")
+    test("Great work. Thumbs up", "Great work 👍", "leading Parakeet period before command")
+
+    # Multiple emojis in one phrase
+    test("thumbs up and smiley face", "👍 and 😊", "multiple emojis in one phrase")
+
+    # False positives — ambiguous standalone words must NOT convert
+    test("I love her heart.", "I love her heart.", "standalone 'heart' not converted")
+    test("The fire was huge.", "The fire was huge.", "standalone 'fire' not converted")
+    test("She is a star.", "She is a star.", "standalone 'star' not converted")
+
+    # -------------------------------------------------------------------
     section("Deep Format Trigger Detection")
     test_trigger("hello world deep format", True, "hello world",
                  label="Basic trigger")

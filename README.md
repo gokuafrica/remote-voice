@@ -90,6 +90,51 @@ Say the punctuation name and it gets replaced with the symbol.
 | "it **apostrophe** s fine" | `It's fine` |
 | "use **open parenthesis** optional **close parenthesis**" | `Use (optional)` |
 
+### Emojis
+
+Say an emoji phrase and it gets replaced with the emoji character. Parakeet comma/hyphen compatibility is handled automatically — "smiley, face", "smiley-face", and "smiley face" all produce 😊.
+
+**Unambiguous phrases** — used directly:
+
+| You say | You get |
+|---------|---------|
+| **smiley face** | 😊 |
+| **laughing face** | 😂 |
+| **winking face** | 😉 |
+| **thinking face** | 🤔 |
+| **raised eyebrow** | 🤨 |
+| **face palm** / **facepalm** | 🤦 |
+| **eye roll** | 🙄 |
+| **thumbs up** | 👍 |
+| **thumbs down** | 👎 |
+| **clapping hands** | 👏 |
+| **waving hand** | 👋 |
+| **crossed fingers** | 🤞 |
+| **folded hands** | 🙏 |
+| **ok hand** | 👌 |
+| **peace sign** | ✌️ |
+| **check mark** | ✅ |
+| **red x** | ❌ |
+| **party popper** | 🎉 |
+| **broken heart** | 💔 |
+
+**Ambiguous words** — require an explicit "emoji" suffix to avoid converting common English words:
+
+| You say | You get |
+|---------|---------|
+| **heart emoji** | ❤️ |
+| **fire emoji** | 🔥 |
+| **star emoji** | ⭐ |
+| **hundred emoji** | 💯 |
+| **shrug emoji** | 🤷 |
+| **muscle emoji** | 💪 |
+| **sparkles emoji** | ✨ |
+| **rocket emoji** | 🚀 |
+| **skull emoji** | 💀 |
+| **poop emoji** | 💩 |
+
+Standalone uses of "heart", "fire", "star", etc. are left unchanged.
+
 ### Numbers
 
 Number words are automatically converted to digits. Multi-word numbers and "percent" are supported.
@@ -212,7 +257,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app. Supports remote servers over Tailscale |
 | **Mac Client** | `mac_tray.py` | macOS menu bar client — same as tray app but for Mac, connects to Windows server over Tailscale |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 103 tests covering regex pipeline + LLM deep format path |
+| **Tests** | `tests.py` | 125 tests covering regex pipeline + LLM deep format path |
 
 ## Setup
 
@@ -391,7 +436,7 @@ python tests.py --regex-only # Regex tests only (no Ollama needed)
 python tests.py --llm-only   # LLM tests only
 ```
 
-**Part 1 — Regex tests (89 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep format trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
+**Part 1 — Regex tests (111 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep format trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
 
 **Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep format path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 

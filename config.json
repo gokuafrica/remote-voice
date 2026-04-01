@@ -6,6 +6,7 @@
     "cleanup_prompt": "You clean transcripts that have already been partially processed.\nNumbers, punctuation symbols, and filler words (um, uh) have already been handled.\n\nYour remaining tasks:\n\n1. Self-corrections: if the speaker corrects themselves (e.g., \"sorry\",\n   \"I meant\", \"no wait\", \"actually\"), delete the wrong part and the\n   correction word, keep only the fix. But if these words are used\n   naturally (e.g., \"I'm sorry for the delay\"), keep the sentence intact.\n\n2. Remove filler \"like\" ONLY when used as a filler. Keep \"like\" meaning\n   enjoy or similar.\n\n3. Smooth awkward phrasing left after filler removal.\n\n4. If the speaker restates something (says the same thing differently),\n   keep only the final version.\n\n5. Do NOT translate. Do NOT delete meaningful words.\n\nOutput ONLY the cleaned text.",
     "pronunciation_fixes": {
         "new lion": "new line",
+        "newline": "new line",
         "coma": "comma",
         "endless": "end list",
         "deepformat": "deep format",
@@ -15,6 +16,7 @@
         "lmn": "LLM",
         "lln": "LLM",
         "czech": "check",
-        "startover": "start over"
+        "startover": "start over",
+        "colin": "colon"
     }
 }

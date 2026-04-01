@@ -36,7 +36,7 @@ Audio → Parakeet V2 (transcription) → apply_pronunciation_fixes() → check_
 
 - `apply_pronunciation_fixes()` replaces known mispronunciations (from `config.json` `pronunciation_fixes`) before any other processing. Uses `[\s-]+` between words and `\b` word boundaries. Does NOT consume surrounding punctuation — downstream command regexes handle that.
 - `check_llm_trigger()` detects "deep format" at end of text. Returns `(trigger: bool, text: str, instruction: str)`. Anything after "deep format" becomes the instruction, prefixed with "format: ".
-- `lightweight_cleanup()` runs all regex in this order: start over, fillers, spoken punctuation, period cleanup, duplicate comma collapse, quote spacing, new paragraph/line, scratch that, number conversion, numbered lists, final capitalization/spacing. Note: new paragraph/line runs BEFORE scratch that so that scratch that respects line/paragraph boundaries (stops at `\n`).
+- `lightweight_cleanup()` runs all regex in this order: start over, fillers, spoken punctuation, period cleanup, duplicate comma collapse, quote spacing, new paragraph/line, scratch that, emoji substitution, number conversion, numbered lists, final capitalization/spacing. Note: new paragraph/line runs BEFORE scratch that so that scratch that respects line/paragraph boundaries (stops at `\n`). Emoji substitution runs BEFORE number conversion so "hundred emoji" → 💯 works correctly ("hundred" would otherwise be converted to "100" first).
 - `cleanup_with_ollama()` only runs when the user explicitly says "deep format". Accepts an optional custom instruction: anything said after "deep format" becomes the instruction.
 
 ## Regex Pattern Conventions
