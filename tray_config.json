@@ -1,6 +1,7 @@
 {
+    "server_url": null,
     "hotkey": "left ctrl+'",
-    "mic_device": "ULT WEAR (Bluetooth)",
+    "mic_device": "USB Microphone",
     "sample_rate": 16000,
     "mode": "push_to_talk"
 }
