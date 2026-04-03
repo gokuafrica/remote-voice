@@ -39,6 +39,7 @@ from Quartz import (
     kCGEventFlagMaskControl,
     kCGEventFlagMaskAlternate,
     kCGEventFlagMaskShift,
+    kCGEventFlagsChanged,
     kCGEventKeyDown,
     kCGEventKeyUp,
     kCGHIDEventTap,
@@ -63,6 +64,17 @@ _MOD_FLAGS = {
     "alt": kCGEventFlagMaskAlternate,
     "shift": kCGEventFlagMaskShift,
 }
+_MOD_KEYCODES = {
+    "cmd": {54, 55},
+    "ctrl": {59, 62},
+    "alt": {58, 61},
+    "shift": {56, 60},
+}
+_EVENT_TYPE_NAMES = {
+    kCGEventFlagsChanged: "flags_changed",
+    kCGEventKeyDown: "key_down",
+    kCGEventKeyUp: "key_up",
+}
 
 TRAY_CONFIG_PATH = Path(__file__).parent / "mac_tray_config.json"
 
@@ -76,6 +88,7 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30
+HOTKEY_TRACE_ENV = "RV_MAC_HOTKEY_TRACE"
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +108,15 @@ def save_tray_config(cfg: dict):
 
 def log(msg: str):
     print(f"{time.strftime('%H:%M:%S')} {msg}")
+
+
+def _trace_enabled() -> bool:
+    return os.environ.get(HOTKEY_TRACE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _format_mod_flags(flags: int) -> str:
+    names = [name for name, mask in _MOD_FLAGS.items() if flags & mask]
+    return "+".join(names) if names else "none"
 
 
 def _set_clipboard(text: str) -> bool:
@@ -209,6 +231,10 @@ class RemoteVoiceMacTray(rumps.App):
         self._last_activate = 0.0
         self._hotkey_mod = self.tray_config.get("hotkey_modifier", "cmd")
         self._hotkey_key = self.tray_config.get("hotkey_key", "'")
+        self._trace_hotkey = _trace_enabled()
+        self._trace_start = time.monotonic()
+        self._trace_seq = 0
+        self._trace_lock = threading.Lock()
 
         # Icons
         self._init_icons()
@@ -267,6 +293,11 @@ class RemoteVoiceMacTray(rumps.App):
 
         hotkey = f"{self._hotkey_mod}+{self._hotkey_key}"
         log(f"Starting: hotkey='{hotkey}', mode={mode}")
+        if self._trace_hotkey:
+            log(
+                f"Hotkey trace enabled ({HOTKEY_TRACE_ENV}=1) for key={self._hotkey_key!r} "
+                f"modifier={self._hotkey_mod!r}"
+            )
 
     # ---- Icons --------------------------------------------------------------
 
@@ -298,6 +329,37 @@ class RemoteVoiceMacTray(rumps.App):
         path = self._icon_paths.get(color, self._icon_paths["gray"])
         self.icon = path
 
+    # ---- Hotkey trace -------------------------------------------------------
+
+    def _trace_event(self, source: str, event_name: str, key_label: str, action: str,
+                     flags: int | None = None, extra: str = ""):
+        if not self._trace_hotkey:
+            return
+
+        with self._trace_lock:
+            self._trace_seq += 1
+            seq = self._trace_seq
+
+        elapsed_ms = (time.monotonic() - self._trace_start) * 1000
+        pressed = ",".join(sorted(str(k) for k in self._pressed_keys)) or "none"
+        flags_text = _format_mod_flags(flags) if flags is not None else "-"
+        suffix = f" {extra}" if extra else ""
+        log(
+            f"TRACE {seq:05d} +{elapsed_ms:010.3f}ms [{source}] {event_name:<13} "
+            f"key={key_label!r} flags={flags_text:<10} held={self._is_combo_held()} "
+            f"active={self._combo_active} state={self.state} pressed={pressed} "
+            f"action={action}{suffix}"
+        )
+
+    def _is_trace_key(self, normalized_key) -> bool:
+        return normalized_key in (self._hotkey_mod, self._hotkey_key)
+
+    def _is_trace_keycode(self, keycode: int) -> bool:
+        return (
+            keycode == _MAC_KEYCODES.get(self._hotkey_key)
+            or keycode in _MOD_KEYCODES.get(self._hotkey_mod, set())
+        )
+
     # ---- Hotkey suppression (CGEvent tap) ------------------------------------
 
     def _setup_key_suppression(self):
@@ -316,20 +378,43 @@ class RemoteVoiceMacTray(rumps.App):
         self._last_hotkey_suppress = 0.0
 
         def tap_callback(proxy, event_type, event, refcon):
-            if event_type in (kCGEventKeyDown, kCGEventKeyUp):
+            if event_type in (kCGEventFlagsChanged, kCGEventKeyDown, kCGEventKeyUp):
                 kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
                 flags = CGEventGetFlags(event)
+                event_name = _EVENT_TYPE_NAMES.get(event_type, str(event_type))
+                key_label = self._hotkey_key if kc == keycode else f"kc:{kc}"
+
                 # Suppress when modifier held (normal case)
-                if kc == keycode and (flags & mod_flag):
+                if event_type in (kCGEventKeyDown, kCGEventKeyUp) and kc == keycode and (flags & mod_flag):
                     self._last_hotkey_suppress = time.monotonic()
+                    self._trace_event(
+                        "tap", event_name, key_label, "suppress_mod_flag", flags,
+                        extra=f"kc={kc}",
+                    )
                     return None
+
                 # Suppress straggler keyup within 500ms (Cmd released before ')
                 if kc == keycode and event_type == kCGEventKeyUp:
-                    if time.monotonic() - self._last_hotkey_suppress < 0.5:
+                    suppress_age_ms = (time.monotonic() - self._last_hotkey_suppress) * 1000
+                    if suppress_age_ms < 500:
+                        self._trace_event(
+                            "tap", event_name, key_label, "suppress_recent_keyup", flags,
+                            extra=f"kc={kc} age_ms={suppress_age_ms:.1f}",
+                        )
                         return None
+
+                if self._is_trace_keycode(kc):
+                    self._trace_event(
+                        "tap", event_name, key_label, "pass_through", flags,
+                        extra=f"kc={kc}",
+                    )
             return event
 
-        event_mask = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
+        event_mask = (
+            (1 << kCGEventFlagsChanged)
+            | (1 << kCGEventKeyDown)
+            | (1 << kCGEventKeyUp)
+        )
         tap = CGEventTapCreate(
             kCGSessionEventTap,
             kCGTailAppendEventTap,  # after pynput's tap so detection still works
@@ -368,16 +453,19 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _on_press(self, key):
         try:
-            self._pressed_keys.add(self._normalize_key(key))
+            normalized = self._normalize_key(key)
+            self._pressed_keys.add(normalized)
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
+            action = "track_only"
 
             if held and not self._combo_active:
                 now = time.monotonic()
                 if (now - self._last_activate) * 1000 >= DEBOUNCE_MS:
                     self._last_activate = now
                     self._combo_active = True
+                    action = f"combo_on_{mode}"
                     log(f"Combo ON  (mode={mode}, state={self.state})")
 
                     if mode == "push_to_talk":
@@ -388,22 +476,33 @@ class RemoteVoiceMacTray(rumps.App):
                             threading.Thread(target=self._do_start, daemon=True).start()
                         elif self.state == self.RECORDING:
                             threading.Thread(target=self._do_stop, daemon=True).start()
+                else:
+                    action = "debounced_combo_on"
+
+            if self._is_trace_key(normalized):
+                self._trace_event("pynput", "press", str(normalized), action)
         except Exception as e:
             log(f"Key press error: {e}")
 
     def _on_release(self, key):
         try:
-            self._pressed_keys.discard(self._normalize_key(key))
+            normalized = self._normalize_key(key)
+            self._pressed_keys.discard(normalized)
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
+            action = "track_only"
 
             if not held and self._combo_active:
                 self._combo_active = False
+                action = f"combo_off_{mode}"
                 log(f"Combo OFF (mode={mode}, state={self.state})")
 
                 if mode == "push_to_talk" and self.state == self.RECORDING:
                     threading.Thread(target=self._do_stop, daemon=True).start()
+
+            if self._is_trace_key(normalized):
+                self._trace_event("pynput", "release", str(normalized), action)
         except Exception as e:
             log(f"Key release error: {e}")
 

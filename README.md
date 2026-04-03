@@ -314,6 +314,12 @@ On first run, click the menu bar icon and select **"Server URL..."** to enter yo
 - **Input Monitoring** — add Terminal.app (for global hotkey detection)
 - **Microphone** — prompted automatically on first recording
 
+**Hotkey leak tracing:** to diagnose a sporadic leading `'` with `Cmd+'`, run:
+```bash
+RV_MAC_HOTKEY_TRACE=1 python mac_tray.py
+```
+The app will print `TRACE ... [tap] ...` and `TRACE ... [pynput] ...` lines for the configured hotkey and modifier. If a leading `'` appears and the tap trace shows `key="'" ... flags=none ... action=pass_through` immediately before `Cmd` becomes active, that matches an event-ordering leak.
+
 ### Phone Setup
 
 1. Install [whisper-to-input APK](https://github.com/j3soon/whisper-to-input/releases)
