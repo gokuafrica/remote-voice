@@ -89,6 +89,7 @@ TRAY_DEFAULTS = {
 
 DEBOUNCE_MS = 30
 HOTKEY_TRACE_ENV = "RV_MAC_HOTKEY_TRACE"
+HOTKEY_TRACE_CONTEXT_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +236,7 @@ class RemoteVoiceMacTray(rumps.App):
         self._trace_start = time.monotonic()
         self._trace_seq = 0
         self._trace_lock = threading.Lock()
+        self._trace_context_until = 0.0
 
         # Icons
         self._init_icons()
@@ -352,12 +354,26 @@ class RemoteVoiceMacTray(rumps.App):
         )
 
     def _is_trace_key(self, normalized_key) -> bool:
-        return normalized_key in (self._hotkey_mod, self._hotkey_key)
+        if normalized_key == self._hotkey_key:
+            self._trace_context_until = time.monotonic() + HOTKEY_TRACE_CONTEXT_S
+            return True
+        if normalized_key != self._hotkey_mod:
+            return False
+        return self._is_trace_context_active()
 
     def _is_trace_keycode(self, keycode: int) -> bool:
+        if keycode == _MAC_KEYCODES.get(self._hotkey_key):
+            self._trace_context_until = time.monotonic() + HOTKEY_TRACE_CONTEXT_S
+            return True
+        if keycode not in _MOD_KEYCODES.get(self._hotkey_mod, set()):
+            return False
+        return self._is_trace_context_active()
+
+    def _is_trace_context_active(self) -> bool:
         return (
-            keycode == _MAC_KEYCODES.get(self._hotkey_key)
-            or keycode in _MOD_KEYCODES.get(self._hotkey_mod, set())
+            self._combo_active
+            or self._hotkey_key in self._pressed_keys
+            or time.monotonic() <= self._trace_context_until
         )
 
     # ---- Hotkey suppression (CGEvent tap) ------------------------------------
