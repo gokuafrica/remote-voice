@@ -314,6 +314,8 @@ On first run, click the menu bar icon and select **"Server URL..."** to enter yo
 - **Input Monitoring** — add Terminal.app (for global hotkey detection)
 - **Microphone** — prompted automatically on first recording
 
+**Mac diagnostics:** The menu bar app now logs timed audio lifecycle steps for mic open/close, including `starting` / `stopping` state transitions. If a Core Audio or PortAudio call hangs for more than ~2 seconds, the app writes a full Python thread dump to the terminal automatically. The menu also includes **"Run Mic Stress Test (25x)"**, which repeatedly opens and closes the built-in mic without sending audio to the server.
+
 ### Phone Setup
 
 1. Install [whisper-to-input APK](https://github.com/j3soon/whisper-to-input/releases)
@@ -434,6 +436,7 @@ The test suite lives in `tests.py` and covers both the regex pipeline (determini
 python tests.py              # Run all tests (regex + LLM)
 python tests.py --regex-only # Regex tests only (no Ollama needed)
 python tests.py --llm-only   # LLM tests only
+python mac_tray_tests.py     # Mac tray diagnostic helper tests
 ```
 
 **Part 1 — Regex tests (111 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep format trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.

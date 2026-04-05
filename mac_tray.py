@@ -8,10 +8,12 @@ macOS port of tray.py — replaces Windows-specific libraries:
   pystray → rumps, keyboard → pynput, Win32 clipboard → pbcopy, Ctrl+V → CGEvent Cmd+V
 """
 
+import faulthandler
 import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -76,6 +78,10 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30
+AUDIO_WATCHDOG_S = 2.0
+MIC_STRESS_CYCLES = 25
+MIC_STRESS_HOLD_S = 0.35
+MIC_STRESS_PAUSE_S = 0.20
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +100,32 @@ def save_tray_config(cfg: dict):
 
 
 def log(msg: str):
-    print(f"{time.strftime('%H:%M:%S')} {msg}")
+    print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
+
+
+def _thread_label() -> str:
+    t = threading.current_thread()
+    return f"{t.name}@{threading.get_ident()}"
+
+
+def _dump_all_thread_stacks(reason: str):
+    log(f"THREAD DUMP START ({reason})")
+    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+    log(f"THREAD DUMP END   ({reason})")
+
+
+def _run_with_watchdog(label: str, func, timeout_s: float = AUDIO_WATCHDOG_S):
+    log(f"{label} BEGIN [thread={_thread_label()}]")
+    timer = threading.Timer(timeout_s, _dump_all_thread_stacks, args=(f"{label} hung > {timeout_s:.1f}s",))
+    timer.daemon = True
+    timer.start()
+    started = time.monotonic()
+    try:
+        return func()
+    finally:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        timer.cancel()
+        log(f"{label} END ({elapsed_ms:.1f}ms) [thread={_thread_label()}]")
 
 
 def _set_clipboard(text: str) -> bool:
@@ -134,7 +165,7 @@ def _clean_device_name(raw: str) -> str | None:
 
 def get_unique_devices() -> list[str]:
     """Return deduplicated clean input device names for the menu."""
-    devices = sd.query_devices()
+    devices = _run_with_watchdog("Audio device query (menu)", sd.query_devices)
     names = set()
     for d in devices:
         if d["max_input_channels"] > 0:
@@ -146,7 +177,7 @@ def get_unique_devices() -> list[str]:
 
 def _find_device_indices(device_name: str) -> list[int]:
     """Find PortAudio index for a clean device name."""
-    devices = sd.query_devices()
+    devices = _run_with_watchdog(f"Audio device query (match {device_name!r})", sd.query_devices)
     for idx, d in enumerate(devices):
         if d["max_input_channels"] > 0 and _clean_device_name(d["name"]) == device_name:
             return [idx]
@@ -187,7 +218,9 @@ def transcribe(session: requests.Session, audio_bytes: bytes, server_url: str,
 # ---------------------------------------------------------------------------
 class RemoteVoiceMacTray(rumps.App):
     IDLE = "idle"
+    STARTING = "starting"
     RECORDING = "recording"
+    STOPPING = "stopping"
     PROCESSING = "processing"
 
     def __init__(self):
@@ -199,9 +232,12 @@ class RemoteVoiceMacTray(rumps.App):
         self.typer = KBController()
         self.actual_sr = 16000
         self._lock = threading.Lock()
+        self._op_lock = threading.Lock()
+        self._audio_op_seq = 0
         self._http = requests.Session()
         self._http.headers["Connection"] = "close"  # fresh TCP per request (no stale connections)
         self._keepalive_http = requests.Session()  # separate session for keepalive
+        self._stress_test_active = False
 
         # Key tracking for pynput
         self._pressed_keys: set = set()
@@ -240,6 +276,7 @@ class RemoteVoiceMacTray(rumps.App):
             rumps.MenuItem("Server URL...", callback=self._set_server_url),
             mode_menu,
             mic_menu,
+            rumps.MenuItem(f"Run Mic Stress Test ({MIC_STRESS_CYCLES}x)", callback=self._start_mic_stress_test),
             None,
             rumps.MenuItem("Quit", callback=self._quit),
         ]
@@ -297,6 +334,67 @@ class RemoteVoiceMacTray(rumps.App):
     def update_icon(self, color):
         path = self._icon_paths.get(color, self._icon_paths["gray"])
         self.icon = path
+
+    def _next_audio_op(self, kind: str) -> str:
+        with self._op_lock:
+            self._audio_op_seq += 1
+            seq = self._audio_op_seq
+        return f"{kind}#{seq}"
+
+    def _set_state(self, new_state: str, reason: str):
+        old_state = self.state
+        self.state = new_state
+        log(f"State {old_state} -> {new_state} ({reason})")
+
+    def _close_stream_with_logging(self, stream, op_id: str):
+        def _close():
+            try:
+                _run_with_watchdog(f"{op_id} stream.stop", stream.stop)
+            except Exception as e:
+                log(f"{op_id} stream.stop error: {e}")
+            try:
+                _run_with_watchdog(f"{op_id} stream.close", stream.close)
+            except Exception as e:
+                log(f"{op_id} stream.close error: {e}")
+
+        worker = threading.Thread(target=_close, daemon=True, name=f"rv-close-{op_id}")
+        worker.start()
+        worker.join(timeout=AUDIO_WATCHDOG_S)
+        if worker.is_alive():
+            log(f"WARNING: {op_id} stream close timed out — continuing anyway")
+        else:
+            log(f"{op_id} stream close finished")
+
+    def _open_input_stream(self, op_id: str, device_name: str | None, sr: int, callback):
+        attempts = _build_device_attempts(device_name, sr)
+        log(f"{op_id} Device attempts: {attempts}")
+
+        for try_dev, try_sr in attempts:
+            stream = None
+            try:
+                stream = _run_with_watchdog(
+                    f"{op_id} InputStream(dev={try_dev}, sr={try_sr})",
+                    lambda try_dev=try_dev, try_sr=try_sr: sd.InputStream(
+                        samplerate=try_sr,
+                        channels=1,
+                        dtype="int16",
+                        device=try_dev,
+                        callback=callback,
+                    ),
+                )
+                _run_with_watchdog(
+                    f"{op_id} stream.start(dev={try_dev}, sr={try_sr})",
+                    stream.start,
+                )
+                actual_sr = int(stream.samplerate)
+                log(f"{op_id} Mic opened: dev={try_dev}, sr={actual_sr}")
+                return stream, actual_sr
+            except Exception as e:
+                log(f"{op_id} Mic fail (dev={try_dev}, sr={try_sr}): {e}")
+                if stream is not None:
+                    self._close_stream_with_logging(stream, f"{op_id}/cleanup")
+
+        return None, None
 
     # ---- Hotkey suppression (CGEvent tap) ------------------------------------
 
@@ -380,7 +478,9 @@ class RemoteVoiceMacTray(rumps.App):
                     self._combo_active = True
                     log(f"Combo ON  (mode={mode}, state={self.state})")
 
-                    if mode == "push_to_talk":
+                    if self._stress_test_active:
+                        log("Combo ignored while mic stress test is running")
+                    elif mode == "push_to_talk":
                         if self.state == self.IDLE:
                             threading.Thread(target=self._do_start, daemon=True).start()
                     else:  # toggle
@@ -427,91 +527,128 @@ class RemoteVoiceMacTray(rumps.App):
     # ---- Recording ----------------------------------------------------------
 
     def _do_start(self):
+        op_id = self._next_audio_op("start")
+        wait_started = time.monotonic()
+        log(f"{op_id} Start requested (state={self.state}, combo_active={self._combo_active})")
         with self._lock:
+            waited_ms = (time.monotonic() - wait_started) * 1000
+            log(f"{op_id} Audio lock acquired after {waited_ms:.1f}ms")
             if self.state != self.IDLE:
+                log(f"{op_id} Start ignored (state={self.state})")
                 return
-            self._start_recording()
+            opened = self._start_recording(op_id)
             if (
-                self.state == self.RECORDING
+                opened
+                and self.state == self.RECORDING
                 and not self._combo_active
                 and self.tray_config.get("mode", "push_to_talk") == "push_to_talk"
             ):
-                log("Combo released during mic open — auto-stopping")
-                self._stop_recording()
+                log(f"{op_id} Combo released during mic open — auto-stopping")
+                self._stop_recording(self._next_audio_op("auto-stop"))
+        log(f"{op_id} Audio lock released")
 
     def _do_stop(self):
+        op_id = self._next_audio_op("stop")
+        wait_started = time.monotonic()
+        log(f"{op_id} Stop requested (state={self.state})")
         with self._lock:
+            waited_ms = (time.monotonic() - wait_started) * 1000
+            log(f"{op_id} Audio lock acquired after {waited_ms:.1f}ms")
             if self.state != self.RECORDING:
+                log(f"{op_id} Stop ignored (state={self.state})")
                 return
-            self._stop_recording()
+            self._stop_recording(op_id)
+        log(f"{op_id} Audio lock released")
 
-    def _start_recording(self):
+    def _start_recording(self, op_id: str) -> bool:
+        self._set_state(self.STARTING, f"{op_id} preparing to open microphone")
         # Kill any orphaned streams from a previous timed-out close
         try:
-            sd.stop()
-        except Exception:
-            pass
+            _run_with_watchdog(f"{op_id} sd.stop preflight", sd.stop)
+        except Exception as e:
+            log(f"{op_id} sd.stop preflight error: {e}")
         self.frames = []
         device_name = self.tray_config.get("mic_device")
         sr = self.tray_config.get("sample_rate", 16000)
-        log(f"Rec start (mic={device_name!r}, sr={sr})")
+        log(f"{op_id} Rec start (mic={device_name!r}, sr={sr})")
 
         def callback(indata, frame_count, time_info, status):
             if self.state == self.RECORDING:
                 self.frames.append(indata.copy())
 
-        attempts = _build_device_attempts(device_name, sr)
+        stream, actual_sr = self._open_input_stream(op_id, device_name, sr, callback)
+        if stream is None:
+            log(f"{op_id} ERROR: all mic attempts failed")
+            self.stream = None
+            self._set_state(self.IDLE, f"{op_id} all mic attempts failed")
+            self.update_icon("gray")
+            return False
 
-        for try_dev, try_sr in attempts:
-            try:
-                self.stream = sd.InputStream(
-                    samplerate=try_sr,
-                    channels=1,
-                    dtype="int16",
-                    device=try_dev,
-                    callback=callback,
-                )
-                self.stream.start()
-                self.actual_sr = int(self.stream.samplerate)
-                self.state = self.RECORDING
-                self.update_icon("red")
-                log(f"Mic opened: dev={try_dev}, sr={self.actual_sr}")
-                return
-            except Exception as e:
-                log(f"Mic fail (dev={try_dev}, sr={try_sr}): {e}")
+        self.stream = stream
+        self.actual_sr = actual_sr
+        self._set_state(self.RECORDING, f"{op_id} microphone opened")
+        self.update_icon("red")
+        return True
 
-        log("ERROR: all mic attempts failed")
-        self.update_icon("gray")
-
-    def _stop_recording(self):
-        self.state = self.PROCESSING
-        log(f"Rec stop ({len(self.frames)} frames)")
+    def _stop_recording(self, op_id: str, *, process_audio: bool = True):
+        self._set_state(self.STOPPING, f"{op_id} stopping microphone")
+        log(f"{op_id} Rec stop ({len(self.frames)} frames)")
 
         if self.stream:
             stream = self.stream
             self.stream = None
-
-            def _close():
-                try:
-                    stream.stop()
-                    stream.close()
-                except Exception:
-                    pass
-
-            t = threading.Thread(target=_close, daemon=True)
-            t.start()
-            t.join(timeout=2)
-            if t.is_alive():
-                log("WARNING: stream close timed out — continuing anyway")
+            self._close_stream_with_logging(stream, op_id)
 
         if not self.frames:
-            log("No audio captured")
-            self.state = self.IDLE
+            log(f"{op_id} No audio captured")
+            self._set_state(self.IDLE, f"{op_id} stop complete with no audio")
             self.update_icon("gray")
             return
 
+        if not process_audio:
+            log(f"{op_id} Discarding captured audio from stress test")
+            self.frames = []
+            self._set_state(self.IDLE, f"{op_id} stress cycle complete")
+            self.update_icon("gray")
+            return
+
+        self._set_state(self.PROCESSING, f"{op_id} sending audio for transcription")
         self.update_icon("blue")
         threading.Thread(target=self._process_audio, daemon=True).start()
+
+    def _run_mic_stress_test(self):
+        log(
+            f"Mic stress test starting ({MIC_STRESS_CYCLES} cycles, "
+            f"hold={MIC_STRESS_HOLD_S:.2f}s, pause={MIC_STRESS_PAUSE_S:.2f}s)"
+        )
+        self._stress_test_active = True
+        try:
+            for cycle in range(1, MIC_STRESS_CYCLES + 1):
+                with self._lock:
+                    if self.state != self.IDLE:
+                        log(f"Mic stress test aborted before cycle {cycle} (state={self.state})")
+                        return
+                    start_id = self._next_audio_op(f"stress-start-{cycle}")
+                    log(f"{start_id} Stress cycle {cycle}/{MIC_STRESS_CYCLES} begin")
+                    opened = self._start_recording(start_id)
+                    if not opened:
+                        log(f"{start_id} Stress cycle {cycle} failed during start")
+                        return
+
+                time.sleep(MIC_STRESS_HOLD_S)
+
+                with self._lock:
+                    if self.state != self.RECORDING:
+                        log(f"Mic stress test aborted during cycle {cycle} (state={self.state})")
+                        return
+                    stop_id = self._next_audio_op(f"stress-stop-{cycle}")
+                    self._stop_recording(stop_id, process_audio=False)
+
+                time.sleep(MIC_STRESS_PAUSE_S)
+
+            log("Mic stress test completed")
+        finally:
+            self._stress_test_active = False
 
     def _run_encoder(self, cmd: list[str], timeout: int = 10) -> bool:
         """Run an audio encoder subprocess with proper timeout and cleanup."""
@@ -623,7 +760,7 @@ class RemoteVoiceMacTray(rumps.App):
         except Exception as e:
             log(f"Transcription error: {e}")
         finally:
-            self.state = self.IDLE
+            self._set_state(self.IDLE, "transcription finished")
             self.update_icon("gray")
             self.frames = []
 
@@ -657,6 +794,15 @@ class RemoteVoiceMacTray(rumps.App):
         self.tray_config["mic_device"] = name
         save_tray_config(self.tray_config)
         log(f"Mic -> {name!r}")
+
+    def _start_mic_stress_test(self, sender):
+        if self._stress_test_active:
+            log("Mic stress test already running")
+            return
+        if self.state != self.IDLE:
+            log(f"Mic stress test unavailable while state={self.state}")
+            return
+        threading.Thread(target=self._run_mic_stress_test, daemon=True, name="rv-mic-stress").start()
 
     def _quit(self, sender):
         self._keepalive_stop.set()
