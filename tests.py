@@ -11,10 +11,12 @@ Regex only:     python tests.py --regex-only
 LLM only:       python tests.py --llm-only
 """
 import asyncio
+import importlib.util
 import sys
+import types
+from pathlib import Path
 
 sys.path.insert(0, '.')
-from mac_hotkey_logic import HotkeySuppressState, evaluate_hotkey_suppression
 from server import (
     lightweight_cleanup,
     check_llm_trigger,
@@ -25,6 +27,137 @@ from server import (
     OLLAMA_MODEL,
 )
 import server
+
+
+def _load_mac_tray_hotkey_logic():
+    inserted = []
+
+    def ensure_module(name, module):
+        if name not in sys.modules:
+            sys.modules[name] = module
+            inserted.append(name)
+
+    rumps = types.ModuleType("rumps")
+    rumps.App = type("App", (), {})
+    rumps.MenuItem = type("MenuItem", (), {"__init__": lambda self, *args, **kwargs: None})
+    rumps.alert = lambda *args, **kwargs: None
+    rumps.quit_application = lambda: None
+    rumps.Window = type(
+        "Window",
+        (),
+        {
+            "__init__": lambda self, *args, **kwargs: None,
+            "run": lambda self: types.SimpleNamespace(clicked=False, text=""),
+        },
+    )
+    ensure_module("rumps", rumps)
+
+    sounddevice = types.ModuleType("sounddevice")
+    sounddevice.query_devices = lambda: []
+    sounddevice.stop = lambda: None
+    sounddevice.InputStream = type("InputStream", (), {})
+    ensure_module("sounddevice", sounddevice)
+
+    pynput = types.ModuleType("pynput")
+    keyboard_mod = types.ModuleType("pynput.keyboard")
+    keyboard_mod.Controller = type("Controller", (), {})
+    keyboard_mod.Listener = type(
+        "Listener",
+        (),
+        {
+            "__init__": lambda self, *args, **kwargs: None,
+            "start": lambda self: None,
+            "stop": lambda self: None,
+        },
+    )
+    keyboard_mod.Key = type(
+        "Key",
+        (),
+        {
+            "cmd_l": object(),
+            "cmd_r": object(),
+            "cmd": object(),
+            "ctrl_l": object(),
+            "ctrl_r": object(),
+            "ctrl": object(),
+            "alt_l": object(),
+            "alt_r": object(),
+            "alt": object(),
+            "shift_l": object(),
+            "shift_r": object(),
+            "shift": object(),
+        },
+    )
+    keyboard_mod.KeyCode = type(
+        "KeyCode",
+        (),
+        {"__init__": lambda self, char=None: setattr(self, "char", char)},
+    )
+    pynput.keyboard = keyboard_mod
+    ensure_module("pynput", pynput)
+    ensure_module("pynput.keyboard", keyboard_mod)
+
+    quartz = types.ModuleType("Quartz")
+    quartz.CGEventCreateKeyboardEvent = lambda *args, **kwargs: object()
+    quartz.CGEventGetFlags = lambda *args, **kwargs: 0
+    quartz.CGEventGetIntegerValueField = lambda *args, **kwargs: 0
+    quartz.CGEventPost = lambda *args, **kwargs: None
+    quartz.CGEventSetFlags = lambda *args, **kwargs: None
+    quartz.CGEventTapCreate = lambda *args, **kwargs: object()
+    quartz.CGEventTapEnable = lambda *args, **kwargs: None
+    quartz.CFMachPortCreateRunLoopSource = lambda *args, **kwargs: object()
+    quartz.CFRunLoopAddSource = lambda *args, **kwargs: None
+    quartz.CFRunLoopGetCurrent = lambda *args, **kwargs: object()
+    quartz.kCFRunLoopCommonModes = 0
+    quartz.kCGEventFlagMaskCommand = 1
+    quartz.kCGEventFlagMaskControl = 2
+    quartz.kCGEventFlagMaskAlternate = 4
+    quartz.kCGEventFlagMaskShift = 8
+    quartz.kCGEventFlagsChanged = 12
+    quartz.kCGEventKeyDown = 10
+    quartz.kCGEventKeyUp = 11
+    quartz.kCGHIDEventTap = 0
+    quartz.kCGKeyboardEventKeycode = 0
+    quartz.kCGSessionEventTap = 0
+    quartz.kCGTailAppendEventTap = 0
+    ensure_module("Quartz", quartz)
+
+    pil = types.ModuleType("PIL")
+    image_mod = types.ModuleType("PIL.Image")
+    image_draw_mod = types.ModuleType("PIL.ImageDraw")
+
+    class _FakeImage:
+        def save(self, *args, **kwargs):
+            return None
+
+    image_mod.new = lambda *args, **kwargs: _FakeImage()
+    image_draw_mod.Draw = lambda *args, **kwargs: types.SimpleNamespace(
+        ellipse=lambda *a, **k: None,
+        rectangle=lambda *a, **k: None,
+        arc=lambda *a, **k: None,
+        line=lambda *a, **k: None,
+    )
+    pil.Image = image_mod
+    pil.ImageDraw = image_draw_mod
+    ensure_module("PIL", pil)
+    ensure_module("PIL.Image", image_mod)
+    ensure_module("PIL.ImageDraw", image_draw_mod)
+
+    module_name = "_mac_tray_test_module"
+    path = Path(__file__).with_name("mac_tray.py")
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+    for name in inserted:
+        sys.modules.pop(name, None)
+    sys.modules.pop(module_name, None)
+
+    return module.HotkeySuppressState, module.evaluate_hotkey_suppression
+
+
+HotkeySuppressState, evaluate_hotkey_suppression = _load_mac_tray_hotkey_logic()
 
 passed = 0
 failed = 0
