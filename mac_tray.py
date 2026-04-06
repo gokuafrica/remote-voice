@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -39,6 +40,7 @@ from Quartz import (
     kCGEventFlagMaskControl,
     kCGEventFlagMaskAlternate,
     kCGEventFlagMaskShift,
+    kCGEventFlagsChanged,
     kCGEventKeyDown,
     kCGEventKeyUp,
     kCGHIDEventTap,
@@ -62,6 +64,11 @@ _MOD_FLAGS = {
     "ctrl": kCGEventFlagMaskControl,
     "alt": kCGEventFlagMaskAlternate,
     "shift": kCGEventFlagMaskShift,
+}
+_EVENT_TYPE_NAMES = {
+    kCGEventFlagsChanged: "flags_changed",
+    kCGEventKeyDown: "key_down",
+    kCGEventKeyUp: "key_up",
 }
 
 TRAY_CONFIG_PATH = Path(__file__).parent / "mac_tray_config.json"
@@ -116,6 +123,68 @@ def _paste():
     CGEventSetFlags(event_up, kCGEventFlagMaskCommand)
     CGEventPost(kCGHIDEventTap, event_down)
     CGEventPost(kCGHIDEventTap, event_up)
+
+
+@dataclass
+class HotkeySuppressState:
+    quote_latched: bool = False
+    last_suppress_ts: float = 0.0
+
+
+@dataclass
+class HotkeySuppressDecision:
+    suppress: bool
+    action: str
+    state: HotkeySuppressState
+
+
+def evaluate_hotkey_suppression(
+    *,
+    event_type: str,
+    keycode: int,
+    hotkey_keycode: int,
+    modifier_flag_active: bool,
+    modifier_pressed: bool,
+    combo_active: bool,
+    state: HotkeySuppressState,
+    now: float,
+) -> HotkeySuppressDecision:
+    """Latch the hotkey key until release so stray apostrophes cannot leak."""
+    if keycode != hotkey_keycode:
+        return HotkeySuppressDecision(False, "not_hotkey_key", state)
+
+    context_active = (
+        modifier_flag_active
+        or modifier_pressed
+        or combo_active
+        or state.quote_latched
+    )
+
+    if event_type == "key_down":
+        if context_active:
+            return HotkeySuppressDecision(
+                True,
+                "suppress_hotkey_down",
+                HotkeySuppressState(True, now),
+            )
+        return HotkeySuppressDecision(False, "pass_through", state)
+
+    if event_type == "key_up":
+        if state.quote_latched:
+            return HotkeySuppressDecision(
+                True,
+                "suppress_latched_keyup",
+                HotkeySuppressState(False, now),
+            )
+        if modifier_flag_active or modifier_pressed or combo_active:
+            return HotkeySuppressDecision(
+                True,
+                "suppress_hotkey_keyup",
+                HotkeySuppressState(False, now),
+            )
+        return HotkeySuppressDecision(False, "pass_through", state)
+
+    return HotkeySuppressDecision(False, "pass_through", state)
 
 
 # ---------------------------------------------------------------------------
@@ -313,23 +382,33 @@ class RemoteVoiceMacTray(rumps.App):
             log(f"Cannot suppress hotkey: unknown key={self._hotkey_key!r} or mod={self._hotkey_mod!r}")
             return
 
-        self._last_hotkey_suppress = 0.0
+        self._hotkey_suppress_state = HotkeySuppressState()
 
         def tap_callback(proxy, event_type, event, refcon):
-            if event_type in (kCGEventKeyDown, kCGEventKeyUp):
+            if event_type in (kCGEventFlagsChanged, kCGEventKeyDown, kCGEventKeyUp):
                 kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
                 flags = CGEventGetFlags(event)
-                # Suppress when modifier held (normal case)
-                if kc == keycode and (flags & mod_flag):
-                    self._last_hotkey_suppress = time.monotonic()
-                    return None
-                # Suppress straggler keyup within 500ms (Cmd released before ')
-                if kc == keycode and event_type == kCGEventKeyUp:
-                    if time.monotonic() - self._last_hotkey_suppress < 0.5:
+                if event_type in (kCGEventKeyDown, kCGEventKeyUp):
+                    decision = evaluate_hotkey_suppression(
+                        event_type=_EVENT_TYPE_NAMES[event_type],
+                        keycode=kc,
+                        hotkey_keycode=keycode,
+                        modifier_flag_active=bool(flags & mod_flag),
+                        modifier_pressed=self._hotkey_mod in self._pressed_keys,
+                        combo_active=self._combo_active,
+                        state=self._hotkey_suppress_state,
+                        now=time.monotonic(),
+                    )
+                    self._hotkey_suppress_state = decision.state
+                    if decision.suppress:
                         return None
             return event
 
-        event_mask = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
+        event_mask = (
+            (1 << kCGEventFlagsChanged)
+            | (1 << kCGEventKeyDown)
+            | (1 << kCGEventKeyUp)
+        )
         tap = CGEventTapCreate(
             kCGSessionEventTap,
             kCGTailAppendEventTap,  # after pynput's tap so detection still works
@@ -368,7 +447,8 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _on_press(self, key):
         try:
-            self._pressed_keys.add(self._normalize_key(key))
+            normalized = self._normalize_key(key)
+            self._pressed_keys.add(normalized)
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
@@ -393,7 +473,8 @@ class RemoteVoiceMacTray(rumps.App):
 
     def _on_release(self, key):
         try:
-            self._pressed_keys.discard(self._normalize_key(key))
+            normalized = self._normalize_key(key)
+            self._pressed_keys.discard(normalized)
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")

@@ -343,6 +343,8 @@ Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the c
 
 The tray app can connect to a remote server over Tailscale — right-click the tray icon and select **"Server URL..."** to enter the server's Tailscale IP (e.g. `http://100.x.y.z:8787`). By default, it connects to `localhost`. Audio is compressed via ffmpeg (OGG/Opus) before sending to reduce upload size over the network; if ffmpeg is not installed, it falls back to uncompressed WAV.
 
+On macOS, the `Cmd+'` hotkey is suppressed until the apostrophe key is physically released, so a stray leading `'` should not leak into the focused app if you release `Cmd` slightly before the `'` key.
+
 ## Configuration
 
 All settings are managed through the GUI (`Remote Voice.bat`), or by editing the JSON files directly.
