@@ -143,6 +143,7 @@ def install_mac_stubs():
         quartz.kCGEventFlagMaskControl = 2
         quartz.kCGEventFlagMaskAlternate = 4
         quartz.kCGEventFlagMaskShift = 8
+        quartz.kCGEventFlagsChanged = 9
         quartz.kCGEventKeyDown = 10
         quartz.kCGEventKeyUp = 11
         quartz.kCGHIDEventTap = 12
