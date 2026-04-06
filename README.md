@@ -314,9 +314,10 @@ On first run, click the menu bar icon and select **"Server URL..."** to enter yo
 - **Input Monitoring** — add Terminal.app (for global hotkey detection)
 - **Microphone** — prompted automatically on first recording
 
-**Hotkey leak tracing:** to diagnose a sporadic leading `'` with `Cmd+'`, run:
+**Hotkey leak tracing:** on the `fix-single-quote` diagnostic branch, tracing is enabled by default to diagnose a sporadic leading `'` with `Cmd+'`.
+If you want to disable it for a quieter run, launch with:
 ```bash
-RV_MAC_HOTKEY_TRACE=1 python mac_tray.py
+RV_MAC_HOTKEY_TRACE=0 python mac_tray.py
 ```
 The app will print `TRACE ... [tap] ...` and `TRACE ... [pynput] ...` lines for the configured hotkey and modifier. If a leading `'` appears and the tap trace shows `key="'" ... flags=none ... action=pass_through` immediately before `Cmd` becomes active, that matches an event-ordering leak.
 

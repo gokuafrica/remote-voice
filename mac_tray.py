@@ -112,7 +112,10 @@ def log(msg: str):
 
 
 def _trace_enabled() -> bool:
-    return os.environ.get(HOTKEY_TRACE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    raw = os.environ.get(HOTKEY_TRACE_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _format_mod_flags(flags: int) -> str:
@@ -297,9 +300,11 @@ class RemoteVoiceMacTray(rumps.App):
         log(f"Starting: hotkey='{hotkey}', mode={mode}")
         if self._trace_hotkey:
             log(
-                f"Hotkey trace enabled ({HOTKEY_TRACE_ENV}=1) for key={self._hotkey_key!r} "
-                f"modifier={self._hotkey_mod!r}"
+                f"Hotkey trace enabled (set {HOTKEY_TRACE_ENV}=0 to disable) "
+                f"for key={self._hotkey_key!r} modifier={self._hotkey_mod!r}"
             )
+        else:
+            log(f"Hotkey trace disabled via {HOTKEY_TRACE_ENV}")
 
     # ---- Icons --------------------------------------------------------------
 
