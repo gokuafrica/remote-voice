@@ -48,6 +48,8 @@ from Quartz import (
     kCGTailAppendEventTap,
 )
 
+from mac_hotkey_logic import HotkeySuppressState, evaluate_hotkey_suppression
+
 # macOS virtual keycodes for hotkey suppression
 _MAC_KEYCODES = {
     "'": 39, ";": 41, "`": 50, "\\": 42, "/": 44,
@@ -396,7 +398,7 @@ class RemoteVoiceMacTray(rumps.App):
             log(f"Cannot suppress hotkey: unknown key={self._hotkey_key!r} or mod={self._hotkey_mod!r}")
             return
 
-        self._last_hotkey_suppress = 0.0
+        self._hotkey_suppress_state = HotkeySuppressState()
 
         def tap_callback(proxy, event_type, event, refcon):
             if event_type in (kCGEventFlagsChanged, kCGEventKeyDown, kCGEventKeyUp):
@@ -404,30 +406,29 @@ class RemoteVoiceMacTray(rumps.App):
                 flags = CGEventGetFlags(event)
                 event_name = _EVENT_TYPE_NAMES.get(event_type, str(event_type))
                 key_label = self._hotkey_key if kc == keycode else f"kc:{kc}"
-
-                # Suppress when modifier held (normal case)
-                if event_type in (kCGEventKeyDown, kCGEventKeyUp) and kc == keycode and (flags & mod_flag):
-                    self._last_hotkey_suppress = time.monotonic()
-                    self._trace_event(
-                        "tap", event_name, key_label, "suppress_mod_flag", flags,
-                        extra=f"kc={kc}",
+                if event_type in (kCGEventKeyDown, kCGEventKeyUp):
+                    decision = evaluate_hotkey_suppression(
+                        event_type=event_name,
+                        keycode=kc,
+                        hotkey_keycode=keycode,
+                        modifier_flag_active=bool(flags & mod_flag),
+                        modifier_pressed=self._hotkey_mod in self._pressed_keys,
+                        combo_active=self._combo_active,
+                        state=self._hotkey_suppress_state,
+                        now=time.monotonic(),
                     )
-                    return None
-
-                # Suppress straggler keyup within 500ms (Cmd released before ')
-                if kc == keycode and event_type == kCGEventKeyUp:
-                    suppress_age_ms = (time.monotonic() - self._last_hotkey_suppress) * 1000
-                    if suppress_age_ms < 500:
+                    self._hotkey_suppress_state = decision.state
+                    if decision.suppress:
                         self._trace_event(
-                            "tap", event_name, key_label, "suppress_recent_keyup", flags,
-                            extra=f"kc={kc} age_ms={suppress_age_ms:.1f}",
+                            "tap", event_name, key_label, decision.action, flags,
+                            extra=f"kc={kc} latched={self._hotkey_suppress_state.quote_latched}",
                         )
                         return None
 
                 if self._is_trace_keycode(kc):
                     self._trace_event(
                         "tap", event_name, key_label, "pass_through", flags,
-                        extra=f"kc={kc}",
+                        extra=f"kc={kc} latched={self._hotkey_suppress_state.quote_latched}",
                     )
             return event
 

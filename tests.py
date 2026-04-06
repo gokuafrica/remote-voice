@@ -14,6 +14,7 @@ import asyncio
 import sys
 
 sys.path.insert(0, '.')
+from mac_hotkey_logic import HotkeySuppressState, evaluate_hotkey_suppression
 from server import (
     lightweight_cleanup,
     check_llm_trigger,
@@ -75,6 +76,43 @@ def test_trigger(input_text, expected_trigger, expected_text,
         print(f"    Input:    {input_text!r}")
         print(f"    Expected: trigger={expected_trigger}, text={expected_text!r}, instruction={expected_instruction!r}")
         print(f"    Got:      trigger={trigger}, text={text!r}, instruction={instruction!r}")
+
+
+def test_mac_hotkey_suppression(event_type, keycode, hotkey_keycode,
+                                modifier_flag_active, modifier_pressed,
+                                combo_active, state, expected_suppress,
+                                expected_action, expected_latched, label=""):
+    global passed, failed, section_passed, section_failed
+    result = evaluate_hotkey_suppression(
+        event_type=event_type,
+        keycode=keycode,
+        hotkey_keycode=hotkey_keycode,
+        modifier_flag_active=modifier_flag_active,
+        modifier_pressed=modifier_pressed,
+        combo_active=combo_active,
+        state=state,
+        now=123.456,
+    )
+    if (
+        result.suppress == expected_suppress
+        and result.action == expected_action
+        and result.state.quote_latched == expected_latched
+    ):
+        passed += 1
+        section_passed += 1
+        print(f"  PASS: {label}")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: {label}")
+        print(
+            f"    Expected: suppress={expected_suppress}, action={expected_action!r}, "
+            f"latched={expected_latched}"
+        )
+        print(
+            f"    Got:      suppress={result.suppress}, action={result.action!r}, "
+            f"latched={result.state.quote_latched}"
+        )
 
 
 async def deep_format(input_text):
@@ -433,6 +471,61 @@ if run_regex:
     test("", "", "Empty input")
     test("   ", "", "Whitespace-only input")
     test("Hello.", "Hello.", "Single word with period")
+
+    # -------------------------------------------------------------------
+    section("macOS Hotkey Suppression")
+    test_mac_hotkey_suppression(
+        event_type="key_down",
+        keycode=39,
+        hotkey_keycode=39,
+        modifier_flag_active=True,
+        modifier_pressed=True,
+        combo_active=True,
+        state=HotkeySuppressState(),
+        expected_suppress=True,
+        expected_action="suppress_hotkey_down",
+        expected_latched=True,
+        label="Initial combo keydown is suppressed and latched",
+    )
+    test_mac_hotkey_suppression(
+        event_type="key_down",
+        keycode=39,
+        hotkey_keycode=39,
+        modifier_flag_active=False,
+        modifier_pressed=False,
+        combo_active=False,
+        state=HotkeySuppressState(quote_latched=True, last_suppress_ts=10.0),
+        expected_suppress=True,
+        expected_action="suppress_hotkey_down",
+        expected_latched=True,
+        label="Repeated bare quote keydown stays suppressed while latched",
+    )
+    test_mac_hotkey_suppression(
+        event_type="key_up",
+        keycode=39,
+        hotkey_keycode=39,
+        modifier_flag_active=False,
+        modifier_pressed=False,
+        combo_active=False,
+        state=HotkeySuppressState(quote_latched=True, last_suppress_ts=10.0),
+        expected_suppress=True,
+        expected_action="suppress_latched_keyup",
+        expected_latched=False,
+        label="Final quote keyup clears latch and is suppressed",
+    )
+    test_mac_hotkey_suppression(
+        event_type="key_down",
+        keycode=39,
+        hotkey_keycode=39,
+        modifier_flag_active=False,
+        modifier_pressed=False,
+        combo_active=False,
+        state=HotkeySuppressState(),
+        expected_suppress=False,
+        expected_action="pass_through",
+        expected_latched=False,
+        label="Plain apostrophe outside hotkey passes through",
+    )
 
     # Print final section count
     if section_passed or section_failed:
