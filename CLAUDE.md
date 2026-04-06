@@ -8,7 +8,7 @@ Do NOT commit code changes without the user reviewing the approach first. When i
 
 ## The Rule: Code, Tests, Docs — Always Together
 
-Every change to the pipeline must update all three in the same commit:
+Every code change in this repo must update all three in the same commit when applicable:
 
 1. **Code** — the feature or fix in `server.py`, `gui.py`, etc.
 2. **Tests** — add or update tests in `tests.py` to cover the change
@@ -25,7 +25,7 @@ Do not merge or commit a change that updates code without corresponding test and
 - `tray.py` — System tray app for PC recording. Rarely changes.
 - `config.json` — Runtime config. The `cleanup_prompt` field is the LLM prompt — if it changes, also update `handy-prompt.txt` and `gui.py` DEFAULTS.
 - `handy-prompt.txt` — Standalone copy of the LLM cleanup prompt. Must stay in sync with `config.json`.
-- `tests.py` — Test suite. Two parts: regex (deterministic, exact match) and LLM (property-based, requires Ollama).
+- `tests.py` — Test suite. Covers the server pipeline plus extracted pure logic for client-side behavior when available. Two parts: regex (deterministic, exact match) and LLM (property-based, requires Ollama).
 - `README.md` — Single source of truth for documentation. No separate SPEC or design docs.
 
 ## How the Pipeline Works
@@ -50,6 +50,8 @@ Example: `new line` → `r'[,.]?\s*\bnew[,.\s-]+line\b[,.]?\s*'`
 
 ## Testing
 
+Passing relevant tests is part of the definition of done for every task. Do not mark work complete, and do not commit, until the relevant automated checks have passed or you have explicitly told the user why they could not be run.
+
 Run tests before committing:
 
 ```bash
@@ -61,12 +63,15 @@ python tests.py --llm-only   # LLM tests only
 - Regex tests use exact string matching — they are deterministic.
 - LLM tests use property checks (must_contain / must_not_contain) because LLM output varies between runs.
 - If Ollama is not available, LLM tests skip gracefully.
+- For tray / macOS hotkey logic or other client-side pure logic, add extracted unit-testable functions and cover them in `tests.py` rather than leaving behavior untested.
+- Run the narrowest relevant test set during iteration, then run the full relevant set before commit.
 
 ### Adding Tests
 
 - For regex changes: add exact-match tests via `test()` in the appropriate section.
 - For trigger changes: add `test_trigger()` calls with `(input, expected_trigger, expected_text, expected_instruction, label)`.
 - For LLM behavior: add `test_llm()` calls with property assertions, not exact matches.
+- For tray or GUI-adjacent behavior: extract pure decision logic where practical and test it directly.
 
 ## Things That Should NOT Change Without Good Reason
 
