@@ -43,6 +43,9 @@ def install_mac_stubs():
     if "sounddevice" not in sys.modules:
         sounddevice = types.ModuleType("sounddevice")
 
+        class CallbackAbort(Exception):
+            pass
+
         class InputStream:
             def __init__(self, *args, **kwargs):
                 self.samplerate = kwargs.get("samplerate") or 16000
@@ -50,12 +53,13 @@ def install_mac_stubs():
             def start(self):
                 return None
 
-            def stop(self):
+            def abort(self):
                 return None
 
             def close(self):
                 return None
 
+        sounddevice.CallbackAbort = CallbackAbort
         sounddevice.InputStream = InputStream
         sounddevice.query_devices = lambda: []
         sounddevice.stop = lambda: None
@@ -158,6 +162,12 @@ mac_tray = importlib.import_module("mac_tray")
 
 
 class MacTrayDiagnosticsTests(unittest.TestCase):
+    def make_app(self):
+        app = mac_tray.RemoteVoiceMacTray()
+        self.addCleanup(app._keepalive_stop.set)
+        self.addCleanup(app._listener.stop)
+        return app
+
     def test_build_device_attempts_prefers_specific_device_before_default(self):
         with mock.patch.object(mac_tray, "_find_device_indices", return_value=[3, 7]):
             attempts = mac_tray._build_device_attempts("Built-in Mic", 16000)
@@ -186,6 +196,36 @@ class MacTrayDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(len(dumps), 1)
         self.assertIn("slow-step hung", dumps[0])
+
+    def test_do_start_refuses_when_audio_is_poisoned(self):
+        app = self.make_app()
+        app._audio_poisoned = True
+        app._audio_poison_reason = "prior close timed out"
+
+        logs = []
+        with mock.patch.object(mac_tray, "log", side_effect=logs.append):
+            app._do_start()
+
+        self.assertTrue(any("Start blocked" in msg for msg in logs))
+
+    def test_close_timeout_poisons_audio_engine(self):
+        app = self.make_app()
+        app._stream_inactive.clear()
+
+        class SlowAbortStream:
+            def abort(self):
+                time.sleep(0.05)
+
+            def close(self):
+                return None
+
+        with mock.patch.object(mac_tray, "AUDIO_WATCHDOG_S", 0.01), mock.patch.object(
+            mac_tray, "AUDIO_INACTIVE_WAIT_S", 0.01
+        ):
+            app._close_stream_with_logging(SlowAbortStream(), "stop#1")
+
+        self.assertTrue(app._audio_poisoned)
+        self.assertIn("close timed out", app._audio_poison_reason)
 
 
 if __name__ == "__main__":

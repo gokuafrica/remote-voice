@@ -314,7 +314,7 @@ On first run, click the menu bar icon and select **"Server URL..."** to enter yo
 - **Input Monitoring** — add Terminal.app (for global hotkey detection)
 - **Microphone** — prompted automatically on first recording
 
-**Mac diagnostics:** The menu bar app now logs timed audio lifecycle steps for mic open/close, including `starting` / `stopping` state transitions. If a Core Audio or PortAudio call hangs for more than ~2 seconds, the app writes a full Python thread dump to the terminal automatically. The menu also includes **"Run Mic Stress Test (25x)"**, which repeatedly opens and closes the built-in mic without sending audio to the server.
+**Mac diagnostics:** The menu bar app now logs timed audio lifecycle steps for mic open/close, including `starting` / `stopping` state transitions. If a Core Audio or PortAudio call hangs for more than ~2 seconds, the app writes a full Python thread dump to the terminal automatically. The menu also includes **"Run Mic Stress Test (25x)"**, which repeatedly opens and closes the built-in mic without sending audio to the server. If a mic open/close hang is detected during normal use, the app disables further recording attempts until restart instead of silently retrying against a wedged audio engine.
 
 ### Phone Setup
 

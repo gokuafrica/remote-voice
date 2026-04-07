@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import wave
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,6 +90,7 @@ AUDIO_WATCHDOG_S = 2.0
 MIC_STRESS_CYCLES = 25
 MIC_STRESS_HOLD_S = 0.35
 MIC_STRESS_PAUSE_S = 0.20
+AUDIO_INACTIVE_WAIT_S = 0.25
 
 
 # ---------------------------------------------------------------------------
@@ -296,13 +298,17 @@ class RemoteVoiceMacTray(rumps.App):
         super().__init__("Remote Voice", quit_button=None)
         self.tray_config = load_tray_config()
         self.state = self.IDLE
-        self.frames: list = []
+        self.frames = deque()
         self.stream = None
         self.typer = KBController()
         self.actual_sr = 16000
         self._lock = threading.Lock()
         self._op_lock = threading.Lock()
         self._audio_op_seq = 0
+        self._stream_inactive = threading.Event()
+        self._stop_requested = threading.Event()
+        self._audio_poisoned = False
+        self._audio_poison_reason = ""
         self._http = requests.Session()
         self._http.headers["Connection"] = "close"  # fresh TCP per request (no stale connections)
         self._keepalive_http = requests.Session()  # separate session for keepalive
@@ -415,12 +421,41 @@ class RemoteVoiceMacTray(rumps.App):
         self.state = new_state
         log(f"State {old_state} -> {new_state} ({reason})")
 
+    def _poison_audio(self, reason: str):
+        if not self._audio_poisoned:
+            log(f"ERROR: audio engine poisoned ({reason})")
+        self._audio_poisoned = True
+        self._audio_poison_reason = reason
+        self._set_state(self.IDLE, f"audio disabled: {reason}")
+        self.update_icon("gray")
+
+    def _build_input_stream(self, callback, finished_callback, try_dev, try_sr):
+        return sd.InputStream(
+            samplerate=try_sr,
+            channels=1,
+            dtype="int16",
+            device=try_dev,
+            callback=callback,
+            finished_callback=finished_callback,
+        )
+
     def _close_stream_with_logging(self, stream, op_id: str):
         def _close():
+            inactive = False
             try:
-                _run_with_watchdog(f"{op_id} stream.stop", stream.stop)
+                inactive = self._stream_inactive.wait(AUDIO_INACTIVE_WAIT_S)
+                if inactive:
+                    log(f"{op_id} stream became inactive via callback")
+                else:
+                    log(f"{op_id} stream still active after {AUDIO_INACTIVE_WAIT_S:.2f}s — aborting")
+                    _run_with_watchdog(f"{op_id} stream.abort", stream.abort)
+                    inactive = self._stream_inactive.wait(AUDIO_INACTIVE_WAIT_S)
+                    if inactive:
+                        log(f"{op_id} stream became inactive after abort")
+                    else:
+                        log(f"{op_id} stream still active after abort")
             except Exception as e:
-                log(f"{op_id} stream.stop error: {e}")
+                log(f"{op_id} stream.abort error: {e}")
             try:
                 _run_with_watchdog(f"{op_id} stream.close", stream.close)
             except Exception as e:
@@ -431,6 +466,7 @@ class RemoteVoiceMacTray(rumps.App):
         worker.join(timeout=AUDIO_WATCHDOG_S)
         if worker.is_alive():
             log(f"WARNING: {op_id} stream close timed out — continuing anyway")
+            self._poison_audio(f"{op_id} close timed out")
         else:
             log(f"{op_id} stream close finished")
 
@@ -439,29 +475,52 @@ class RemoteVoiceMacTray(rumps.App):
         log(f"{op_id} Device attempts: {attempts}")
 
         for try_dev, try_sr in attempts:
-            stream = None
-            try:
-                stream = _run_with_watchdog(
-                    f"{op_id} InputStream(dev={try_dev}, sr={try_sr})",
-                    lambda try_dev=try_dev, try_sr=try_sr: sd.InputStream(
-                        samplerate=try_sr,
-                        channels=1,
-                        dtype="int16",
-                        device=try_dev,
-                        callback=callback,
-                    ),
-                )
-                _run_with_watchdog(
-                    f"{op_id} stream.start(dev={try_dev}, sr={try_sr})",
-                    stream.start,
-                )
-                actual_sr = int(stream.samplerate)
-                log(f"{op_id} Mic opened: dev={try_dev}, sr={actual_sr}")
-                return stream, actual_sr
-            except Exception as e:
-                log(f"{op_id} Mic fail (dev={try_dev}, sr={try_sr}): {e}")
-                if stream is not None:
-                    self._close_stream_with_logging(stream, f"{op_id}/cleanup")
+            result = {}
+            done = threading.Event()
+
+            def finished_callback():
+                self._stream_inactive.set()
+
+            def _open():
+                stream = None
+                try:
+                    stream = _run_with_watchdog(
+                        f"{op_id} InputStream(dev={try_dev}, sr={try_sr})",
+                        lambda try_dev=try_dev, try_sr=try_sr: self._build_input_stream(
+                            callback,
+                            finished_callback,
+                            try_dev,
+                            try_sr,
+                        ),
+                    )
+                    _run_with_watchdog(
+                        f"{op_id} stream.start(dev={try_dev}, sr={try_sr})",
+                        stream.start,
+                    )
+                    result["stream"] = stream
+                    result["actual_sr"] = int(stream.samplerate)
+                    log(f"{op_id} Mic opened: dev={try_dev}, sr={result['actual_sr']}")
+                except Exception as e:
+                    result["error"] = e
+                    if stream is not None:
+                        try:
+                            _run_with_watchdog(f"{op_id}/cleanup stream.close", stream.close)
+                        except Exception as cleanup_error:
+                            log(f"{op_id}/cleanup stream.close error: {cleanup_error}")
+                finally:
+                    done.set()
+
+            worker = threading.Thread(target=_open, daemon=True, name=f"rv-open-{op_id}")
+            worker.start()
+            if not done.wait(AUDIO_WATCHDOG_S):
+                log(f"ERROR: {op_id} mic open timed out (dev={try_dev}, sr={try_sr})")
+                self._poison_audio(f"{op_id} open timed out")
+                return None, None
+
+            if "stream" in result:
+                return result["stream"], result["actual_sr"]
+
+            log(f"{op_id} Mic fail (dev={try_dev}, sr={try_sr}): {result['error']}")
 
         return None, None
 
@@ -614,6 +673,9 @@ class RemoteVoiceMacTray(rumps.App):
         with self._lock:
             waited_ms = (time.monotonic() - wait_started) * 1000
             log(f"{op_id} Audio lock acquired after {waited_ms:.1f}ms")
+            if self._audio_poisoned:
+                log(f"{op_id} Start blocked — audio restart required ({self._audio_poison_reason})")
+                return
             if self.state != self.IDLE:
                 log(f"{op_id} Start ignored (state={self.state})")
                 return
@@ -642,13 +704,14 @@ class RemoteVoiceMacTray(rumps.App):
         log(f"{op_id} Audio lock released")
 
     def _start_recording(self, op_id: str) -> bool:
+        if self._audio_poisoned:
+            log(f"{op_id} Start refused — audio restart required ({self._audio_poison_reason})")
+            return False
+
         self._set_state(self.STARTING, f"{op_id} preparing to open microphone")
-        # Kill any orphaned streams from a previous timed-out close
-        try:
-            _run_with_watchdog(f"{op_id} sd.stop preflight", sd.stop)
-        except Exception as e:
-            log(f"{op_id} sd.stop preflight error: {e}")
-        self.frames = []
+        self.frames.clear()
+        self._stop_requested.clear()
+        self._stream_inactive.clear()
         device_name = self.tray_config.get("mic_device")
         sr = self.tray_config.get("sample_rate", 16000)
         log(f"{op_id} Rec start (mic={device_name!r}, sr={sr})")
@@ -656,6 +719,8 @@ class RemoteVoiceMacTray(rumps.App):
         def callback(indata, frame_count, time_info, status):
             if self.state == self.RECORDING:
                 self.frames.append(indata.copy())
+            if self._stop_requested.is_set():
+                raise sd.CallbackAbort()
 
         stream, actual_sr = self._open_input_stream(op_id, device_name, sr, callback)
         if stream is None:
@@ -674,6 +739,7 @@ class RemoteVoiceMacTray(rumps.App):
     def _stop_recording(self, op_id: str, *, process_audio: bool = True):
         self._set_state(self.STOPPING, f"{op_id} stopping microphone")
         log(f"{op_id} Rec stop ({len(self.frames)} frames)")
+        self._stop_requested.set()
 
         if self.stream:
             stream = self.stream
@@ -843,7 +909,7 @@ class RemoteVoiceMacTray(rumps.App):
         finally:
             self._set_state(self.IDLE, "transcription finished")
             self.update_icon("gray")
-            self.frames = []
+            self.frames = deque()
 
     # ---- Menu callbacks -----------------------------------------------------
 
