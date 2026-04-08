@@ -65,6 +65,12 @@ _MOD_FLAGS = {
     "alt": kCGEventFlagMaskAlternate,
     "shift": kCGEventFlagMaskShift,
 }
+_MOD_KEYCODES = {
+    "cmd": {54, 55},
+    "ctrl": {59, 62},
+    "alt": {58, 61},
+    "shift": {56, 60},
+}
 _EVENT_TYPE_NAMES = {
     kCGEventFlagsChanged: "flags_changed",
     kCGEventKeyDown: "key_down",
@@ -83,6 +89,8 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30
+HOTKEY_TRACE_ENV = "RV_MAC_HOTKEY_TRACE"
+HOTKEY_TRACE_CONTEXT_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +110,18 @@ def save_tray_config(cfg: dict):
 
 def log(msg: str):
     print(f"{time.strftime('%H:%M:%S')} {msg}")
+
+
+def _trace_enabled() -> bool:
+    raw = os.environ.get(HOTKEY_TRACE_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _format_mod_flags(flags: int) -> str:
+    names = [name for name, mask in _MOD_FLAGS.items() if flags & mask]
+    return "+".join(names) if names else "none"
 
 
 def _set_clipboard(text: str) -> bool:
@@ -278,6 +298,11 @@ class RemoteVoiceMacTray(rumps.App):
         self._last_activate = 0.0
         self._hotkey_mod = self.tray_config.get("hotkey_modifier", "cmd")
         self._hotkey_key = self.tray_config.get("hotkey_key", "'")
+        self._trace_hotkey = _trace_enabled()
+        self._trace_start = time.monotonic()
+        self._trace_seq = 0
+        self._trace_lock = threading.Lock()
+        self._trace_context_until = 0.0
 
         # Icons
         self._init_icons()
@@ -336,6 +361,13 @@ class RemoteVoiceMacTray(rumps.App):
 
         hotkey = f"{self._hotkey_mod}+{self._hotkey_key}"
         log(f"Starting: hotkey='{hotkey}', mode={mode}")
+        if self._trace_hotkey:
+            log(
+                f"Hotkey trace enabled (set {HOTKEY_TRACE_ENV}=0 to disable) "
+                f"for key={self._hotkey_key!r} modifier={self._hotkey_mod!r}"
+            )
+        else:
+            log(f"Hotkey trace disabled via {HOTKEY_TRACE_ENV}")
 
     # ---- Icons --------------------------------------------------------------
 
@@ -367,6 +399,51 @@ class RemoteVoiceMacTray(rumps.App):
         path = self._icon_paths.get(color, self._icon_paths["gray"])
         self.icon = path
 
+    # ---- Hotkey trace -------------------------------------------------------
+
+    def _trace_event(self, source: str, event_name: str, key_label: str, action: str,
+                     flags: int | None = None, extra: str = ""):
+        if not self._trace_hotkey:
+            return
+
+        with self._trace_lock:
+            self._trace_seq += 1
+            seq = self._trace_seq
+
+        elapsed_ms = (time.monotonic() - self._trace_start) * 1000
+        pressed = ",".join(sorted(str(k) for k in self._pressed_keys)) or "none"
+        flags_text = _format_mod_flags(flags) if flags is not None else "-"
+        suffix = f" {extra}" if extra else ""
+        log(
+            f"TRACE {seq:05d} +{elapsed_ms:010.3f}ms [{source}] {event_name:<13} "
+            f"key={key_label!r} flags={flags_text:<10} held={self._is_combo_held()} "
+            f"active={self._combo_active} state={self.state} pressed={pressed} "
+            f"action={action}{suffix}"
+        )
+
+    def _is_trace_key(self, normalized_key) -> bool:
+        if normalized_key == self._hotkey_key:
+            self._trace_context_until = time.monotonic() + HOTKEY_TRACE_CONTEXT_S
+            return True
+        if normalized_key != self._hotkey_mod:
+            return False
+        return self._is_trace_context_active()
+
+    def _is_trace_keycode(self, keycode: int) -> bool:
+        if keycode == _MAC_KEYCODES.get(self._hotkey_key):
+            self._trace_context_until = time.monotonic() + HOTKEY_TRACE_CONTEXT_S
+            return True
+        if keycode not in _MOD_KEYCODES.get(self._hotkey_mod, set()):
+            return False
+        return self._is_trace_context_active()
+
+    def _is_trace_context_active(self) -> bool:
+        return (
+            self._combo_active
+            or self._hotkey_key in self._pressed_keys
+            or time.monotonic() <= self._trace_context_until
+        )
+
     # ---- Hotkey suppression (CGEvent tap) ------------------------------------
 
     def _setup_key_suppression(self):
@@ -388,6 +465,8 @@ class RemoteVoiceMacTray(rumps.App):
             if event_type in (kCGEventFlagsChanged, kCGEventKeyDown, kCGEventKeyUp):
                 kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
                 flags = CGEventGetFlags(event)
+                event_name = _EVENT_TYPE_NAMES.get(event_type, str(event_type))
+                key_label = self._hotkey_key if kc == keycode else f"kc:{kc}"
                 if event_type in (kCGEventKeyDown, kCGEventKeyUp):
                     decision = evaluate_hotkey_suppression(
                         event_type=_EVENT_TYPE_NAMES[event_type],
@@ -401,7 +480,17 @@ class RemoteVoiceMacTray(rumps.App):
                     )
                     self._hotkey_suppress_state = decision.state
                     if decision.suppress:
+                        if self._is_trace_keycode(kc):
+                            self._trace_event(
+                                "tap", event_name, key_label, decision.action, flags,
+                                extra=f"kc={kc}",
+                            )
                         return None
+                if self._is_trace_keycode(kc):
+                    self._trace_event(
+                        "tap", event_name, key_label, "pass_through", flags,
+                        extra=f"kc={kc}",
+                    )
             return event
 
         event_mask = (
@@ -452,12 +541,14 @@ class RemoteVoiceMacTray(rumps.App):
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
+            action = "track_only"
 
             if held and not self._combo_active:
                 now = time.monotonic()
                 if (now - self._last_activate) * 1000 >= DEBOUNCE_MS:
                     self._last_activate = now
                     self._combo_active = True
+                    action = f"combo_on_{mode}"
                     log(f"Combo ON  (mode={mode}, state={self.state})")
 
                     if mode == "push_to_talk":
@@ -468,6 +559,10 @@ class RemoteVoiceMacTray(rumps.App):
                             threading.Thread(target=self._do_start, daemon=True).start()
                         elif self.state == self.RECORDING:
                             threading.Thread(target=self._do_stop, daemon=True).start()
+                else:
+                    action = "debounced_combo_on"
+            if self._is_trace_key(normalized):
+                self._trace_event("pynput", "press", str(normalized), action)
         except Exception as e:
             log(f"Key press error: {e}")
 
@@ -478,13 +573,17 @@ class RemoteVoiceMacTray(rumps.App):
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
+            action = "track_only"
 
             if not held and self._combo_active:
                 self._combo_active = False
+                action = f"combo_off_{mode}"
                 log(f"Combo OFF (mode={mode}, state={self.state})")
 
                 if mode == "push_to_talk" and self.state == self.RECORDING:
                     threading.Thread(target=self._do_stop, daemon=True).start()
+            if self._is_trace_key(normalized):
+                self._trace_event("pynput", "release", str(normalized), action)
         except Exception as e:
             log(f"Key release error: {e}")
 

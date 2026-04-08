@@ -12,6 +12,7 @@ LLM only:       python tests.py --llm-only
 """
 import asyncio
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -154,10 +155,20 @@ def _load_mac_tray_hotkey_logic():
         sys.modules.pop(name, None)
     sys.modules.pop(module_name, None)
 
-    return module.HotkeySuppressState, module.evaluate_hotkey_suppression
+    return (
+        module.HotkeySuppressState,
+        module.evaluate_hotkey_suppression,
+        module._trace_enabled,
+        module._format_mod_flags,
+    )
 
 
-HotkeySuppressState, evaluate_hotkey_suppression = _load_mac_tray_hotkey_logic()
+(
+    HotkeySuppressState,
+    evaluate_hotkey_suppression,
+    mac_trace_enabled,
+    format_mac_mod_flags,
+) = _load_mac_tray_hotkey_logic()
 
 passed = 0
 failed = 0
@@ -246,6 +257,50 @@ def test_mac_hotkey_suppression(event_type, keycode, hotkey_keycode,
             f"    Got:      suppress={result.suppress}, action={result.action!r}, "
             f"latched={result.state.quote_latched}"
         )
+
+
+def test_mac_hotkey_trace_enabled(env_value, expected, label=""):
+    global passed, failed, section_passed, section_failed
+    prior = os.environ.get("RV_MAC_HOTKEY_TRACE")
+    try:
+        if env_value is None:
+            os.environ.pop("RV_MAC_HOTKEY_TRACE", None)
+        else:
+            os.environ["RV_MAC_HOTKEY_TRACE"] = env_value
+        result = mac_trace_enabled()
+    finally:
+        if prior is None:
+            os.environ.pop("RV_MAC_HOTKEY_TRACE", None)
+        else:
+            os.environ["RV_MAC_HOTKEY_TRACE"] = prior
+
+    if result == expected:
+        passed += 1
+        section_passed += 1
+        print(f"  PASS: {label}")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: {label}")
+        print(f"    Env value: {env_value!r}")
+        print(f"    Expected:  {expected}")
+        print(f"    Got:       {result}")
+
+
+def test_mac_mod_flags(flags, expected, label=""):
+    global passed, failed, section_passed, section_failed
+    result = format_mac_mod_flags(flags)
+    if result == expected:
+        passed += 1
+        section_passed += 1
+        print(f"  PASS: {label}")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: {label}")
+        print(f"    Flags:    {flags}")
+        print(f"    Expected: {expected!r}")
+        print(f"    Got:      {result!r}")
 
 
 async def deep_format(input_text):
@@ -607,6 +662,26 @@ if run_regex:
 
     # -------------------------------------------------------------------
     section("macOS Hotkey Suppression")
+    test_mac_hotkey_trace_enabled(
+        env_value=None,
+        expected=True,
+        label="Hotkey tracing defaults to enabled when env var is unset",
+    )
+    test_mac_hotkey_trace_enabled(
+        env_value="0",
+        expected=False,
+        label="Hotkey tracing can be disabled explicitly",
+    )
+    test_mac_mod_flags(
+        flags=0,
+        expected="none",
+        label="Modifier formatter handles no flags",
+    )
+    test_mac_mod_flags(
+        flags=1 | 8,
+        expected="cmd+shift",
+        label="Modifier formatter preserves mac modifier names",
+    )
     test_mac_hotkey_suppression(
         event_type="key_down",
         keycode=39,
