@@ -401,13 +401,19 @@ class RemoteVoiceMacTray(rumps.App):
     def _init_icons(self):
         self._icon_paths = {}
         for color in ("gray", "red", "blue", "green"):
-            img = self.create_icon_image(color)
+            self._icon_paths[color] = self._ensure_icon_file(color)
+
+    def _ensure_icon_file(self, color):
+        path = self._icon_paths.get(color)
+        if path is None:
             path = os.path.join(tempfile.gettempdir(), f"rv_icon_{color}.png")
-            img.save(path)
-            self._icon_paths[color] = path
+        if not os.path.exists(path):
+            self.create_icon_image(color).save(path)
+        self._icon_paths[color] = path
+        return path
 
     def update_icon(self, color):
-        path = self._icon_paths.get(color, self._icon_paths["gray"])
+        path = self._ensure_icon_file(color)
         self.icon = path
 
     def _next_audio_op(self, kind: str) -> str:
