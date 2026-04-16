@@ -1,0 +1,8 @@
+{
+    "server_url": "http://100.x.y.z:8787",
+    "hotkey_modifier": "cmd",
+    "hotkey_key": "'",
+    "mic_device": null,
+    "sample_rate": 16000,
+    "mode": "push_to_talk"
+}
