@@ -42,6 +42,10 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30  # Handy STT uses 30ms
+CF_UNICODETEXT = 13
+GMEM_MOVEABLE = 0x0002
+CLIPBOARD_OPEN_RETRIES = 5
+CLIPBOARD_OPEN_RETRY_DELAY_S = 0.02
 
 # Host API reliability order — MME is most compatible (esp. Bluetooth)
 _API_ORDER = {
@@ -90,11 +94,7 @@ def _init_com():
         pass
 
 
-def _set_clipboard(text: str) -> bool:
-    """Set clipboard text via Win32 API with proper 64-bit type annotations."""
-    CF_UNICODETEXT = 13
-    GMEM_MOVEABLE = 0x0002
-
+def _clipboard_apis():
     u32 = ctypes.windll.user32
     k32 = ctypes.windll.kernel32
 
@@ -109,12 +109,68 @@ def _set_clipboard(text: str) -> bool:
     k32.GlobalUnlock.restype = ctypes.c_bool
     u32.OpenClipboard.argtypes = [ctypes.c_void_p]
     u32.OpenClipboard.restype = ctypes.c_bool
+    u32.IsClipboardFormatAvailable.argtypes = [ctypes.c_uint]
+    u32.IsClipboardFormatAvailable.restype = ctypes.c_bool
+    u32.GetClipboardData.argtypes = [ctypes.c_uint]
+    u32.GetClipboardData.restype = ctypes.c_void_p
     u32.EmptyClipboard.restype = ctypes.c_bool
     u32.CloseClipboard.restype = ctypes.c_bool
     u32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
     u32.SetClipboardData.restype = ctypes.c_void_p
+    u32.GetClipboardSequenceNumber.restype = ctypes.c_uint
 
-    if not u32.OpenClipboard(None):
+    return u32, k32
+
+
+def _open_clipboard(u32) -> bool:
+    for attempt in range(CLIPBOARD_OPEN_RETRIES):
+        if u32.OpenClipboard(None):
+            return True
+        if attempt < CLIPBOARD_OPEN_RETRIES - 1:
+            time.sleep(CLIPBOARD_OPEN_RETRY_DELAY_S * (attempt + 1))
+    return False
+
+
+def _clipboard_sequence_number() -> int:
+    try:
+        u32, _ = _clipboard_apis()
+        return int(u32.GetClipboardSequenceNumber())
+    except Exception as e:
+        log(f"Clipboard: sequence unavailable: {e}")
+        return 0
+
+
+def _get_clipboard_text() -> str | None:
+    """Return current Unicode text clipboard content, or None if no text exists."""
+    u32, k32 = _clipboard_apis()
+
+    if not _open_clipboard(u32):
+        log("Clipboard: OpenClipboard failed while reading")
+        return None
+    try:
+        if not u32.IsClipboardFormatAvailable(CF_UNICODETEXT):
+            return None
+        h = u32.GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            log("Clipboard: GetClipboardData failed")
+            return None
+        p = k32.GlobalLock(h)
+        if not p:
+            log("Clipboard: GlobalLock failed while reading")
+            return None
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            k32.GlobalUnlock(h)
+    finally:
+        u32.CloseClipboard()
+
+
+def _set_clipboard(text: str) -> bool:
+    """Set clipboard text via Win32 API with proper 64-bit type annotations."""
+    u32, k32 = _clipboard_apis()
+
+    if not _open_clipboard(u32):
         log("Clipboard: OpenClipboard failed")
         return False
     try:
@@ -130,10 +186,46 @@ def _set_clipboard(text: str) -> bool:
             return False
         ctypes.memmove(p, data, len(data))
         k32.GlobalUnlock(h)
-        u32.SetClipboardData(CF_UNICODETEXT, h)
+        if not u32.SetClipboardData(CF_UNICODETEXT, h):
+            log("Clipboard: SetClipboardData failed")
+            return False
         return True
     finally:
         u32.CloseClipboard()
+
+
+def _paste_text_preserving_clipboard(text: str, paste_func, type_func, sleep_func=time.sleep) -> bool:
+    try:
+        backup_text = _get_clipboard_text()
+    except Exception as e:
+        log(f"Clipboard read failed: {e}")
+        backup_text = None
+    if backup_text is None:
+        log("Clipboard has no text backup - falling back to typing")
+        type_func(text)
+        return False
+
+    if not _set_clipboard(text):
+        log("Clipboard failed - falling back to typing")
+        type_func(text)
+        return False
+
+    temporary_sequence = _clipboard_sequence_number()
+    sleep_func(0.05)
+    paste_func()
+    log("Pasted via clipboard")
+    sleep_func(0.15)
+
+    current_sequence = _clipboard_sequence_number()
+    if temporary_sequence and current_sequence and current_sequence != temporary_sequence:
+        log("Clipboard changed during paste - skipping restore")
+        return True
+
+    if _set_clipboard(backup_text):
+        log("Clipboard restored")
+    else:
+        log("Clipboard restore failed")
+    return True
 
 
 
@@ -531,13 +623,11 @@ class RemoteVoiceTray:
             if text:
                 # Ensure modifier keys from hotkey are fully released
                 time.sleep(0.3)
-                if _set_clipboard(text):
-                    time.sleep(0.05)
-                    keyboard.send('ctrl+v')
-                    log("Pasted via clipboard")
-                else:
-                    log("Clipboard failed — falling back to typing")
-                    keyboard.write(text, delay=0.01)
+                _paste_text_preserving_clipboard(
+                    text,
+                    paste_func=lambda: keyboard.send('ctrl+v'),
+                    type_func=lambda value: keyboard.write(value, delay=0.01),
+                )
 
             self.update_icon("green")
             time.sleep(0.5)
