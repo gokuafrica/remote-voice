@@ -30,6 +30,11 @@ import sounddevice as sd
 from PIL import Image, ImageDraw
 from pynput.keyboard import Controller as KBController
 
+try:
+    import pythoncom
+except ImportError:
+    pythoncom = None
+
 CONFIG_PATH = Path(__file__).parent / "config.json"
 TRAY_CONFIG_PATH = Path(__file__).parent / "tray_config.json"
 
@@ -94,6 +99,15 @@ def _init_com():
         pass
 
 
+def _ole_apis():
+    ole32 = ctypes.windll.ole32
+    ole32.OleInitialize.argtypes = [ctypes.c_void_p]
+    ole32.OleInitialize.restype = ctypes.c_long
+    ole32.OleUninitialize.argtypes = []
+    ole32.OleUninitialize.restype = None
+    return ole32
+
+
 def _clipboard_apis():
     u32 = ctypes.windll.user32
     k32 = ctypes.windll.kernel32
@@ -120,6 +134,68 @@ def _clipboard_apis():
     u32.GetClipboardSequenceNumber.restype = ctypes.c_uint
 
     return u32, k32
+
+
+def _retry_clipboard_call(action, failure_message: str, sleep_func=time.sleep):
+    last_error = None
+    for attempt in range(CLIPBOARD_OPEN_RETRIES):
+        try:
+            return True, action()
+        except Exception as e:
+            last_error = e
+            if attempt < CLIPBOARD_OPEN_RETRIES - 1:
+                sleep_func(CLIPBOARD_OPEN_RETRY_DELAY_S * (attempt + 1))
+    if last_error is not None:
+        log(f"{failure_message}: {last_error}")
+    return False, None
+
+
+def _init_ole_clipboard() -> bool:
+    try:
+        hr = int(_ole_apis().OleInitialize(None))
+    except Exception as e:
+        log(f"Clipboard: OleInitialize failed: {e}")
+        return False
+    if hr in (0, 1):  # S_OK / S_FALSE
+        return True
+    log(f"Clipboard: OleInitialize failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}")
+    return False
+
+
+def _uninit_ole_clipboard():
+    try:
+        _ole_apis().OleUninitialize()
+    except Exception:
+        pass
+
+
+def _capture_clipboard_snapshot(sleep_func=time.sleep):
+    if pythoncom is None:
+        log("Clipboard: pywin32 unavailable, full snapshot support disabled")
+        return False, None
+    return _retry_clipboard_call(
+        pythoncom.OleGetClipboard,
+        "Clipboard: OleGetClipboard failed",
+        sleep_func,
+    )
+
+
+def _restore_clipboard_snapshot(snapshot, sleep_func=time.sleep) -> bool:
+    if pythoncom is None:
+        log("Clipboard: pywin32 unavailable, cannot restore full snapshot")
+        return False
+
+    def restore():
+        pythoncom.OleSetClipboard(snapshot)
+        pythoncom.OleFlushClipboard()
+        return True
+
+    ok, _ = _retry_clipboard_call(
+        restore,
+        "Clipboard: OLE clipboard restore failed",
+        sleep_func,
+    )
+    return ok
 
 
 def _open_clipboard(u32) -> bool:
@@ -195,37 +271,60 @@ def _set_clipboard(text: str) -> bool:
 
 
 def _paste_text_preserving_clipboard(text: str, paste_func, type_func, sleep_func=time.sleep) -> bool:
+    backup_mode = None
+    backup_value = None
+    ole_initialized = _init_ole_clipboard()
     try:
-        backup_text = _get_clipboard_text()
-    except Exception as e:
-        log(f"Clipboard read failed: {e}")
-        backup_text = None
-    if backup_text is None:
-        log("Clipboard has no text backup - falling back to typing")
-        type_func(text)
-        return False
+        if ole_initialized:
+            snapshot_ok, snapshot = _capture_clipboard_snapshot(sleep_func)
+            if snapshot_ok:
+                backup_mode = "snapshot"
+                backup_value = snapshot
 
-    if not _set_clipboard(text):
-        log("Clipboard failed - falling back to typing")
-        type_func(text)
-        return False
+        if backup_mode is None:
+            try:
+                backup_text = _get_clipboard_text()
+            except Exception as e:
+                log(f"Clipboard read failed: {e}")
+                backup_text = None
+            if backup_text is not None:
+                backup_mode = "text"
+                backup_value = backup_text
 
-    temporary_sequence = _clipboard_sequence_number()
-    sleep_func(0.05)
-    paste_func()
-    log("Pasted via clipboard")
-    sleep_func(0.15)
+        if backup_mode is None:
+            log("Clipboard backup unavailable - falling back to typing")
+            type_func(text)
+            return False
 
-    current_sequence = _clipboard_sequence_number()
-    if temporary_sequence and current_sequence and current_sequence != temporary_sequence:
-        log("Clipboard changed during paste - skipping restore")
+        if not _set_clipboard(text):
+            log("Clipboard failed - falling back to typing")
+            type_func(text)
+            return False
+
+        temporary_sequence = _clipboard_sequence_number()
+        sleep_func(0.05)
+        paste_func()
+        log("Pasted via clipboard")
+        sleep_func(0.15)
+
+        current_sequence = _clipboard_sequence_number()
+        if temporary_sequence and current_sequence and current_sequence != temporary_sequence:
+            log("Clipboard changed during paste - skipping restore")
+            return True
+
+        restored = False
+        if backup_mode == "snapshot":
+            restored = _restore_clipboard_snapshot(backup_value, sleep_func)
+        else:
+            restored = _set_clipboard(backup_value)
+        if restored:
+            log("Clipboard restored")
+        else:
+            log("Clipboard restore failed")
         return True
-
-    if _set_clipboard(backup_text):
-        log("Clipboard restored")
-    else:
-        log("Clipboard restore failed")
-    return True
+    finally:
+        if ole_initialized:
+            _uninit_ole_clipboard()
 
 
 
@@ -626,7 +725,7 @@ class RemoteVoiceTray:
                 _paste_text_preserving_clipboard(
                     text,
                     paste_func=lambda: keyboard.send('ctrl+v'),
-                    type_func=lambda value: keyboard.write(value, delay=0.01),
+                    type_func=lambda value: keyboard.write(value, delay=0),
                 )
 
             self.update_icon("green")
