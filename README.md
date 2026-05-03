@@ -276,6 +276,8 @@ pip install onnxruntime-gpu
 pip install nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-cusparse-cu12 nvidia-cusolver-cu12 nvidia-curand-cu12 nvidia-nvjitlink-cu12
 ```
 
+On Windows, `pip install -r requirements.txt` now also installs `pywin32`, which the tray app uses to preserve non-text clipboard contents while still pasting dictation instantly.
+
 FFmpeg is also required for audio format conversion:
 ```bash
 winget install Gyan.FFmpeg
@@ -344,6 +346,8 @@ Switch to the Whisper to Input keyboard in any app, tap the mic button, speak. T
 Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Left Ctrl + '`) to record. Right-click the tray icon to select microphone, recording mode (push-to-talk or toggle), and server URL.
 
 The tray app can connect to a remote server over Tailscale — right-click the tray icon and select **"Server URL..."** to enter the server's Tailscale IP (e.g. `http://100.x.y.z:8787`). By default, it connects to `localhost`. Audio is compressed via ffmpeg (OGG/Opus) before sending to reduce upload size over the network; if ffmpeg is not installed, it falls back to uncompressed WAV.
+
+On Windows, the tray app preserves the full clipboard when it pastes dictated text, so copied files, images, and other non-text clipboard contents should remain intact after dictation.
 
 On macOS, the `Cmd+'` hotkey is suppressed until the apostrophe key is physically released, so a stray leading `'` should not leak into the focused app if you release `Cmd` slightly before the `'` key.
 

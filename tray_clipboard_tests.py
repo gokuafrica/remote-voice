@@ -95,73 +95,123 @@ tray = importlib.import_module("tray")
 
 
 class TrayClipboardTests(unittest.TestCase):
-    def run_transaction(self, text="dictated", backup="copied", sequences=(10, 10), set_result=True):
+    def run_transaction(
+        self,
+        text="dictated",
+        snapshot_ok=True,
+        snapshot=mock.sentinel.snapshot,
+        backup="copied",
+        sequences=(10, 10),
+        set_result=True,
+        restore_result=True,
+        ole_initialized=True,
+        text_side_effect=None,
+    ):
         paste = mock.Mock()
         typed = mock.Mock()
         sleep = mock.Mock()
         with (
-            mock.patch.object(tray, "_get_clipboard_text", return_value=backup),
+            mock.patch.object(tray, "_init_ole_clipboard", return_value=ole_initialized),
+            mock.patch.object(
+                tray,
+                "_capture_clipboard_snapshot",
+                return_value=(snapshot_ok, snapshot),
+            ) as capture_snapshot,
+            mock.patch.object(
+                tray,
+                "_get_clipboard_text",
+                return_value=backup,
+                side_effect=text_side_effect,
+            ) as get_clipboard_text,
             mock.patch.object(tray, "_set_clipboard", return_value=set_result) as set_clipboard,
+            mock.patch.object(
+                tray,
+                "_restore_clipboard_snapshot",
+                return_value=restore_result,
+            ) as restore_clipboard,
             mock.patch.object(tray, "_clipboard_sequence_number", side_effect=list(sequences)),
+            mock.patch.object(tray, "_uninit_ole_clipboard") as uninit_ole,
             mock.patch.object(tray, "log"),
         ):
             result = tray._paste_text_preserving_clipboard(text, paste, typed, sleep)
-        return result, paste, typed, sleep, set_clipboard
+        return {
+            "result": result,
+            "paste": paste,
+            "typed": typed,
+            "sleep": sleep,
+            "set_clipboard": set_clipboard,
+            "restore_clipboard": restore_clipboard,
+            "capture_snapshot": capture_snapshot,
+            "get_clipboard_text": get_clipboard_text,
+            "uninit_ole": uninit_ole,
+        }
 
-    def test_existing_text_clipboard_is_restored_after_paste(self):
-        result, paste, typed, sleep, set_clipboard = self.run_transaction()
+    def test_non_text_clipboard_snapshot_is_restored_after_paste(self):
+        tx = self.run_transaction()
 
-        self.assertTrue(result)
-        self.assertEqual(set_clipboard.call_args_list, [mock.call("dictated"), mock.call("copied")])
-        paste.assert_called_once_with()
-        typed.assert_not_called()
-        self.assertEqual(sleep.call_args_list, [mock.call(0.05), mock.call(0.15)])
+        self.assertTrue(tx["result"])
+        tx["capture_snapshot"].assert_called_once()
+        tx["get_clipboard_text"].assert_not_called()
+        tx["set_clipboard"].assert_called_once_with("dictated")
+        tx["restore_clipboard"].assert_called_once_with(mock.sentinel.snapshot, tx["sleep"])
+        tx["paste"].assert_called_once_with()
+        tx["typed"].assert_not_called()
+        self.assertEqual(tx["sleep"].call_args_list, [mock.call(0.05), mock.call(0.15)])
+        tx["uninit_ole"].assert_called_once_with()
 
-    def test_no_text_clipboard_falls_back_to_typing(self):
-        paste = mock.Mock()
-        typed = mock.Mock()
-        with (
-            mock.patch.object(tray, "_get_clipboard_text", return_value=None),
-            mock.patch.object(tray, "_set_clipboard") as set_clipboard,
-            mock.patch.object(tray, "log"),
-        ):
-            result = tray._paste_text_preserving_clipboard("dictated", paste, typed, mock.Mock())
+    def test_text_clipboard_is_restored_when_snapshot_is_unavailable(self):
+        tx = self.run_transaction(snapshot_ok=False, backup="copied")
 
-        self.assertFalse(result)
-        typed.assert_called_once_with("dictated")
-        paste.assert_not_called()
-        set_clipboard.assert_not_called()
+        self.assertTrue(tx["result"])
+        tx["capture_snapshot"].assert_called_once()
+        tx["get_clipboard_text"].assert_called_once_with()
+        self.assertEqual(
+            tx["set_clipboard"].call_args_list,
+            [mock.call("dictated"), mock.call("copied")],
+        )
+        tx["restore_clipboard"].assert_not_called()
+        tx["paste"].assert_called_once_with()
+        tx["typed"].assert_not_called()
 
-    def test_clipboard_read_failure_falls_back_to_typing(self):
-        paste = mock.Mock()
-        typed = mock.Mock()
-        with (
-            mock.patch.object(tray, "_get_clipboard_text", side_effect=RuntimeError("locked")),
-            mock.patch.object(tray, "_set_clipboard") as set_clipboard,
-            mock.patch.object(tray, "log"),
-        ):
-            result = tray._paste_text_preserving_clipboard("dictated", paste, typed, mock.Mock())
+    def test_no_clipboard_backup_falls_back_to_typing(self):
+        tx = self.run_transaction(snapshot_ok=False, backup=None)
 
-        self.assertFalse(result)
-        typed.assert_called_once_with("dictated")
-        paste.assert_not_called()
-        set_clipboard.assert_not_called()
+        self.assertFalse(tx["result"])
+        tx["typed"].assert_called_once_with("dictated")
+        tx["paste"].assert_not_called()
+        tx["set_clipboard"].assert_not_called()
+        tx["restore_clipboard"].assert_not_called()
 
     def test_temporary_write_failure_falls_back_to_typing(self):
-        result, paste, typed, _sleep, set_clipboard = self.run_transaction(set_result=False)
+        tx = self.run_transaction(set_result=False)
 
-        self.assertFalse(result)
-        set_clipboard.assert_called_once_with("dictated")
-        typed.assert_called_once_with("dictated")
-        paste.assert_not_called()
+        self.assertFalse(tx["result"])
+        tx["set_clipboard"].assert_called_once_with("dictated")
+        tx["typed"].assert_called_once_with("dictated")
+        tx["paste"].assert_not_called()
+        tx["restore_clipboard"].assert_not_called()
 
     def test_changed_clipboard_sequence_skips_restore(self):
-        result, paste, typed, _sleep, set_clipboard = self.run_transaction(sequences=(10, 11))
+        tx = self.run_transaction(sequences=(10, 11))
 
-        self.assertTrue(result)
-        set_clipboard.assert_called_once_with("dictated")
-        paste.assert_called_once_with()
-        typed.assert_not_called()
+        self.assertTrue(tx["result"])
+        tx["set_clipboard"].assert_called_once_with("dictated")
+        tx["restore_clipboard"].assert_not_called()
+        tx["paste"].assert_called_once_with()
+        tx["typed"].assert_not_called()
+
+    def test_clipboard_read_failure_falls_back_to_typing(self):
+        tx = self.run_transaction(
+            snapshot_ok=False,
+            backup=None,
+            text_side_effect=RuntimeError("locked"),
+        )
+
+        self.assertFalse(tx["result"])
+        tx["get_clipboard_text"].assert_called_once_with()
+        tx["typed"].assert_called_once_with("dictated")
+        tx["paste"].assert_not_called()
+        tx["set_clipboard"].assert_not_called()
 
 
 if __name__ == "__main__":

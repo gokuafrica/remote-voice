@@ -6,3 +6,4 @@ onnxruntime-gpu
 httpx
 huggingface_hub
 word2number
+pywin32; platform_system == "Windows"
