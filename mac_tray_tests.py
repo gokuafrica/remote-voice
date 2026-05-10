@@ -1,5 +1,6 @@
 import importlib
 import sys
+import threading
 import time
 import types
 import unittest
@@ -168,6 +169,23 @@ def install_mac_stubs():
         appkit.NSPasteboardTypeString = "public.utf8-plain-text"
         sys.modules["AppKit"] = appkit
 
+    if "Foundation" not in sys.modules:
+        foundation = types.ModuleType("Foundation")
+
+        class NSThread:
+            @staticmethod
+            def isMainThread():
+                return True
+
+        class NSOperationQueue:
+            @staticmethod
+            def mainQueue():
+                return types.SimpleNamespace(addOperationWithBlock_=lambda func: func())
+
+        foundation.NSThread = NSThread
+        foundation.NSOperationQueue = NSOperationQueue
+        sys.modules["Foundation"] = foundation
+
 
 install_mac_stubs()
 mac_tray = importlib.import_module("mac_tray")
@@ -238,6 +256,26 @@ class MacTrayDiagnosticsTests(unittest.TestCase):
 
         self.assertTrue(app._audio_poisoned)
         self.assertIn("close timed out", app._audio_poison_reason)
+
+    def test_update_icon_from_worker_thread_schedules_ui_assignment(self):
+        app = self.make_app()
+        initial_icon = app.icon
+        queued = []
+
+        with (
+            mock.patch.object(app, "_ensure_icon_file", return_value="/tmp/rv_icon_red.png"),
+            mock.patch.object(mac_tray, "_run_on_main_thread", side_effect=queued.append),
+        ):
+            worker = threading.Thread(target=app.update_icon, args=("red",))
+            worker.start()
+            worker.join(timeout=1)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(app.icon, initial_icon)
+        self.assertEqual(len(queued), 1)
+
+        queued[0]()
+        self.assertEqual(app.icon, "/tmp/rv_icon_red.png")
 
     def test_existing_text_clipboard_is_restored_after_paste(self):
         paste = mock.Mock()
