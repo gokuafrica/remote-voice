@@ -466,4 +466,4 @@ AI agents: see `CLAUDE.md` for detailed project conventions, architecture, and r
 - All processing is local — audio never leaves your network
 - Temp audio files are deleted immediately after processing
 - Tailscale encrypts all phone-to-PC traffic
-- No cloud APIs, no telemetry
+- No cloud APIs
