@@ -213,13 +213,41 @@ class TrayClipboardTests(unittest.TestCase):
         tx["paste"].assert_not_called()
         tx["set_clipboard"].assert_not_called()
 
-    def test_right_ctrl_hotkey_only_matches_right_ctrl_scan_code(self):
-        scan_sets = tray._normalize_hotkey_scan_sets(
-            "right ctrl",
-            [set([57629, 29, 57373])],
+    def make_tray_for_hotkey(self):
+        app = object.__new__(tray.RemoteVoiceTray)
+        app.tray_config = {"hotkey": "right ctrl", "mode": "toggle"}
+        app.state = tray.RemoteVoiceTray.IDLE
+        app._pressed_scans = set()
+        app._right_ctrl_pressed = False
+        app._combo_active = False
+        app._last_activate = 0.0
+        app._combo_scan_sets = [set([57629, 29, 57373])]
+        return app
+
+    def key_event(self, event_type, name, scan_code):
+        return types.SimpleNamespace(
+            event_type=event_type,
+            name=name,
+            scan_code=scan_code,
         )
 
-        self.assertEqual(scan_sets, [set([57629])])
+    def test_right_ctrl_hotkey_ignores_left_ctrl_event(self):
+        app = self.make_tray_for_hotkey()
+
+        with mock.patch.object(app, "_do_start") as start:
+            app._on_key_event(self.key_event(tray.keyboard.KEY_DOWN, "left ctrl", 29))
+
+        start.assert_not_called()
+        self.assertFalse(app._combo_active)
+
+    def test_right_ctrl_hotkey_accepts_right_ctrl_event(self):
+        app = self.make_tray_for_hotkey()
+
+        with mock.patch.object(app, "_do_start") as start:
+            app._on_key_event(self.key_event(tray.keyboard.KEY_DOWN, "right ctrl", 29))
+
+        start.assert_called_once_with()
+        self.assertTrue(app._combo_active)
 
 
 if __name__ == "__main__":

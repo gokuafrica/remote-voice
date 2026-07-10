@@ -47,7 +47,6 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30  # Handy STT uses 30ms
-RIGHT_CTRL_SCAN_CODES = {57629}
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 CLIPBOARD_OPEN_RETRIES = 5
@@ -88,11 +87,16 @@ def save_tray_config(cfg: dict):
         json.dump(cfg, f, indent=4)
 
 
-def _normalize_hotkey_scan_sets(hotkey: str, scan_sets: list[set[int]]) -> list[set[int]]:
-    """Correct keyboard.parse_hotkey aliases that are too broad for this app."""
-    if hotkey.strip().lower() in {"right ctrl", "right control"}:
-        return [set(RIGHT_CTRL_SCAN_CODES)]
-    return scan_sets
+def _normalized_hotkey(hotkey: str) -> str:
+    return hotkey.strip().lower().replace("control", "ctrl")
+
+
+def _is_exact_right_ctrl_hotkey(hotkey: str) -> bool:
+    return _normalized_hotkey(hotkey) == "right ctrl"
+
+
+def _is_right_ctrl_event(event) -> bool:
+    return getattr(event, "name", "").lower().replace("control", "ctrl") == "right ctrl"
 
 
 def log(msg: str):
@@ -463,6 +467,7 @@ class RemoteVoiceTray:
 
         # Scan-code tracking for push-to-talk (like Handy's rdev approach)
         self._pressed_scans: set[int] = set()
+        self._right_ctrl_pressed = False
         self._combo_active = False
         self._last_activate = 0.0
         self._combo_scan_sets: list[set[int]] = []
@@ -506,8 +511,7 @@ class RemoteVoiceTray:
         try:
             parsed = keyboard.parse_hotkey(hotkey)
             step = parsed[0]  # first step only (no multi-step sequences)
-            scan_sets = [set(part) for part in step]
-            self._combo_scan_sets = _normalize_hotkey_scan_sets(hotkey, scan_sets)
+            self._combo_scan_sets = [set(part) for part in step]
             log(f"Hotkey '{hotkey}' -> scans: {self._combo_scan_sets}")
         except Exception as e:
             log(f"Failed to parse hotkey '{hotkey}': {e}")
@@ -515,6 +519,8 @@ class RemoteVoiceTray:
 
     def _is_combo_held(self) -> bool:
         """True when at least one scan code from each hotkey part is pressed."""
+        if _is_exact_right_ctrl_hotkey(self.tray_config["hotkey"]):
+            return self._right_ctrl_pressed
         return bool(self._combo_scan_sets) and all(
             part_scans & self._pressed_scans
             for part_scans in self._combo_scan_sets
@@ -526,8 +532,12 @@ class RemoteVoiceTray:
             sc = event.scan_code
             if event.event_type == keyboard.KEY_DOWN:
                 self._pressed_scans.add(sc)
+                if _is_right_ctrl_event(event):
+                    self._right_ctrl_pressed = True
             elif event.event_type == keyboard.KEY_UP:
                 self._pressed_scans.discard(sc)
+                if _is_right_ctrl_event(event):
+                    self._right_ctrl_pressed = False
 
             held = self._is_combo_held()
             mode = self.tray_config.get("mode", "push_to_talk")
