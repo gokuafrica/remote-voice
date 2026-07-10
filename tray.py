@@ -47,6 +47,7 @@ TRAY_DEFAULTS = {
 }
 
 DEBOUNCE_MS = 30  # Handy STT uses 30ms
+RIGHT_CTRL_SCAN_CODES = {57629}
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 CLIPBOARD_OPEN_RETRIES = 5
@@ -85,6 +86,13 @@ def load_tray_config() -> dict:
 def save_tray_config(cfg: dict):
     with open(TRAY_CONFIG_PATH, "w") as f:
         json.dump(cfg, f, indent=4)
+
+
+def _normalize_hotkey_scan_sets(hotkey: str, scan_sets: list[set[int]]) -> list[set[int]]:
+    """Correct keyboard.parse_hotkey aliases that are too broad for this app."""
+    if hotkey.strip().lower() in {"right ctrl", "right control"}:
+        return [set(RIGHT_CTRL_SCAN_CODES)]
+    return scan_sets
 
 
 def log(msg: str):
@@ -498,7 +506,8 @@ class RemoteVoiceTray:
         try:
             parsed = keyboard.parse_hotkey(hotkey)
             step = parsed[0]  # first step only (no multi-step sequences)
-            self._combo_scan_sets = [set(part) for part in step]
+            scan_sets = [set(part) for part in step]
+            self._combo_scan_sets = _normalize_hotkey_scan_sets(hotkey, scan_sets)
             log(f"Hotkey '{hotkey}' -> scans: {self._combo_scan_sets}")
         except Exception as e:
             log(f"Failed to parse hotkey '{hotkey}': {e}")

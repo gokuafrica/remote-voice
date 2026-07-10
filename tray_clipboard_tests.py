@@ -213,6 +213,14 @@ class TrayClipboardTests(unittest.TestCase):
         tx["paste"].assert_not_called()
         tx["set_clipboard"].assert_not_called()
 
+    def test_right_ctrl_hotkey_only_matches_right_ctrl_scan_code(self):
+        scan_sets = tray._normalize_hotkey_scan_sets(
+            "right ctrl",
+            [set([57629, 29, 57373])],
+        )
+
+        self.assertEqual(scan_sets, [set([57629])])
+
 
 if __name__ == "__main__":
     unittest.main()
