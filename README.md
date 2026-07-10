@@ -343,7 +343,7 @@ Switch to the Whisper to Input keyboard in any app, tap the mic button, speak. T
 
 ### From Your PC
 
-Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Left Ctrl + '`) to record. Right-click the tray icon to select microphone, recording mode (push-to-talk or toggle), and server URL.
+Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Right Ctrl`) to toggle recording on or off. Right-click the tray icon to select microphone, recording mode (push-to-talk or toggle), and server URL.
 
 The tray app can connect to a remote server over Tailscale — right-click the tray icon and select **"Server URL..."** to enter the server's Tailscale IP (e.g. `http://100.x.y.z:8787`). By default, it connects to `localhost`. Audio is compressed via ffmpeg (OGG/Opus) before sending to reduce upload size over the network; if ffmpeg is not installed, it falls back to uncompressed WAV.
 
@@ -370,10 +370,10 @@ All settings are managed through the GUI (`Remote Voice.bat`), or by editing the
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `server_url` | Server URL for remote connections (e.g. `http://100.x.y.z:8787`), or `null` for localhost | `null` |
-| `hotkey` | Global hotkey for recording | `left ctrl+'` |
+| `hotkey` | Global hotkey for recording | `right ctrl` |
 | `mic_device` | Microphone name (or null for system default) | `null` |
 | `sample_rate` | Audio sample rate (Hz) | `16000` |
-| `mode` | `push_to_talk` (hold) or `toggle` (press twice) | `push_to_talk` |
+| `mode` | `push_to_talk` (hold) or `toggle` (press twice) | `toggle` |
 
 ## API Endpoints
 

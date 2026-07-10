@@ -1,7 +1,7 @@
 {
     "server_url": null,
-    "hotkey": "left ctrl+'",
+    "hotkey": "right ctrl",
     "mic_device": "USB Microphone",
     "sample_rate": 16000,
-    "mode": "push_to_talk"
+    "mode": "toggle"
 }

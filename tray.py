@@ -40,10 +40,10 @@ TRAY_CONFIG_PATH = Path(__file__).parent / "tray_config.json"
 
 TRAY_DEFAULTS = {
     "server_url": None,       # e.g. "http://100.x.y.z:8787" — null = localhost from config.json
-    "hotkey": "left ctrl+'",
+    "hotkey": "right ctrl",
     "mic_device": None,       # clean device name (str) or None for system default
     "sample_rate": 16000,
-    "mode": "push_to_talk",   # "push_to_talk" or "toggle"
+    "mode": "toggle",         # "push_to_talk" or "toggle"
 }
 
 DEBOUNCE_MS = 30  # Handy STT uses 30ms
