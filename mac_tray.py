@@ -32,6 +32,11 @@ try:
 except Exception:
     NSPasteboard = None
     NSPasteboardTypeString = "public.utf8-plain-text"
+try:
+    from Foundation import NSOperationQueue, NSThread
+except Exception:
+    NSOperationQueue = None
+    NSThread = None
 from Quartz import (
     CGEventCreateKeyboardEvent,
     CGEventGetFlags,
@@ -142,6 +147,13 @@ def _run_with_watchdog(label: str, func, timeout_s: float = AUDIO_WATCHDOG_S):
         elapsed_ms = (time.monotonic() - started) * 1000
         timer.cancel()
         log(f"{label} END ({elapsed_ms:.1f}ms) [thread={_thread_label()}]")
+
+
+def _run_on_main_thread(func):
+    if NSThread is None or NSThread.isMainThread():
+        func()
+        return
+    NSOperationQueue.mainQueue().addOperationWithBlock_(func)
 
 
 def _general_pasteboard():
@@ -494,7 +506,11 @@ class RemoteVoiceMacTray(rumps.App):
 
     def update_icon(self, color):
         path = self._ensure_icon_file(color)
-        self.icon = path
+
+        def _apply_icon():
+            self.icon = path
+
+        _run_on_main_thread(_apply_icon)
 
     def _next_audio_op(self, kind: str) -> str:
         with self._op_lock:
