@@ -257,7 +257,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app. Supports remote servers over Tailscale |
 | **Mac Client** | `mac_tray.py` | macOS menu bar client — same as tray app but for Mac, connects to Windows server over Tailscale |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 125 tests covering regex pipeline + LLM deep format path |
+| **Tests** | `tests.py` | 127 tests covering regex pipeline + LLM deep format path |
 
 ## Setup
 
@@ -282,6 +282,11 @@ FFmpeg is also required for audio format conversion:
 ```bash
 winget install Gyan.FFmpeg
 ```
+
+A few things are handled automatically:
+- ffmpeg is detected from a bundled `ffmpeg\` folder next to the scripts first, falling back to `ffmpeg` on PATH.
+- If Ollama isn't running, the "deep format" command still works — you get the regex-cleaned text without LLM polish instead of an error.
+- CUDA DLLs from the nvidia pip wheels are located automatically whether they were installed with `--user` or into a venv/embedded Python.
 
 The Parakeet V2 ONNX model (~2 GB) downloads automatically from HuggingFace on first server start.
 

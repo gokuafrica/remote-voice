@@ -15,6 +15,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -64,6 +65,13 @@ _API_ORDER = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _find_ffmpeg() -> str:
+    bundled = Path(__file__).parent / "ffmpeg" / "ffmpeg.exe"
+    if bundled.is_file():
+        return str(bundled)
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+
 def load_server_config() -> dict:
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r") as f:
@@ -683,7 +691,7 @@ class RemoteVoiceTray:
             with open(wav_path, "wb") as f:
                 f.write(wav_bytes)
             subprocess.run(
-                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path],
+                [_find_ffmpeg(), "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path],
                 check=True, capture_output=True, timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )

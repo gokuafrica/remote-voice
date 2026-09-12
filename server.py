@@ -8,21 +8,34 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Add CUDA DLL directories to PATH before importing onnxruntime
-_nvidia_base = os.path.join(
-    os.path.expanduser("~"), "AppData", "Roaming", "Python",
-    f"Python{__import__('sys').version_info.major}{__import__('sys').version_info.minor}",
-    "site-packages", "nvidia",
-)
-_cuda_paths = [d for d in glob.glob(os.path.join(_nvidia_base, "*", "bin")) if os.path.isdir(d)]
+# Add CUDA DLL directories to PATH before importing onnxruntime.
+# Wheels may live in <sys.prefix>\Lib\site-packages (venv/embedded Python)
+# or in %APPDATA%\Roaming\Python\Python3XX\site-packages (pip install --user).
+_nvidia_candidates = [
+    os.path.join(sys.prefix, "Lib", "site-packages", "nvidia"),
+    os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming", "Python",
+        f"Python{sys.version_info.major}{sys.version_info.minor}",
+        "site-packages", "nvidia",
+    ),
+]
+_cuda_paths = []
+for _base in _nvidia_candidates:
+    if os.path.isdir(_base):
+        _cuda_paths.extend(d for d in glob.glob(os.path.join(_base, "*", "bin")) if os.path.isdir(d))
+_cuda_paths = list(dict.fromkeys(_cuda_paths))
 if _cuda_paths:
+    for _dir in _cuda_paths:
+        os.add_dll_directory(_dir)
     os.environ["PATH"] = os.pathsep.join(_cuda_paths) + os.pathsep + os.environ.get("PATH", "")
 
 import httpx
@@ -116,11 +129,18 @@ async def lifespan(app):
 app = FastAPI(title="Remote Voice Server", lifespan=lifespan)
 
 
+def _find_ffmpeg() -> str:
+    bundled = Path(__file__).parent / "ffmpeg" / "ffmpeg.exe"
+    if bundled.is_file():
+        return str(bundled)
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+
 def convert_to_wav(input_path: str) -> str:
     """Convert any audio format to 16kHz mono WAV using ffmpeg."""
     wav_path = input_path + ".wav"
     subprocess.run(
-        ["ffmpeg", "-y", "-i", input_path, "-ar", "16000", "-ac", "1", wav_path],
+        [_find_ffmpeg(), "-y", "-i", input_path, "-ar", "16000", "-ac", "1", wav_path],
         capture_output=True,
         check=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
@@ -188,8 +208,14 @@ async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
             actual_model = data.get("model", "unknown")
             log.info(f"Ollama responded with model: {actual_model}")
             return data["message"]["content"].strip()
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        log.warning(f"Ollama not reachable ({e.__class__.__name__}) — returning regex-cleaned text")
+        return raw_text
+    except httpx.HTTPStatusError as e:
+        log.warning(f"Ollama returned HTTP {e.response.status_code} — returning regex-cleaned text")
+        return raw_text
     except Exception as e:
-        log.warning(f"Ollama cleanup failed ({e}), returning raw transcript")
+        log.warning(f"Ollama cleanup failed ({e}), returning regex-cleaned transcript")
         return raw_text
 
 

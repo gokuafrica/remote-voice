@@ -15,6 +15,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, '.')
 from server import (
@@ -604,6 +605,33 @@ if run_regex:
     test("", "", "Empty input")
     test("   ", "", "Whitespace-only input")
     test("Hello.", "Hello.", "Single word with period")
+
+    # -------------------------------------------------------------------
+    section("FFmpeg Lookup")
+    result = server._find_ffmpeg()
+    if isinstance(result, str) and result:
+        passed += 1
+        section_passed += 1
+        print(f"  PASS: falls back to PATH/shutil.which when no bundled ffmpeg ({result})")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: expected non-empty fallback path, got {result!r}")
+
+    with mock.patch.object(server, "Path") as fake_path_cls:
+        bundled = mock.MagicMock()
+        bundled.is_file.return_value = True
+        fake_path_cls.return_value.parent.__truediv__.return_value = bundled
+        bundled.__truediv__.return_value = bundled
+        result = server._find_ffmpeg()
+    if result == str(bundled):
+        passed += 1
+        section_passed += 1
+        print("  PASS: prefers bundled ffmpeg\\ffmpeg.exe when present")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: expected bundled path, got {result!r}")
 
     # -------------------------------------------------------------------
     section("macOS Hotkey Suppression")
