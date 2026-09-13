@@ -43,6 +43,23 @@ function migrateLegacyData() {
   }
 }
 
+// Single source of truth for "apply a config change" (settings window AND
+// tray menu): persist via config.set, re-register the hotkey, rebuild the
+// tray menu, hot-reload engine fixes. Both paths go through exactly this so
+// they can never diverge again.
+function applyChange(patch) {
+  config.set(patch || {});
+  const cfg = config.get();
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'pronunciation_fixes')) {
+    engine.setFixes(cfg.pronunciation_fixes).catch((err) => {
+      log(`set_fixes after save failed: ${err.message}`);
+    });
+  }
+  hotkey.applyConfig(cfg);
+  tray.rebuildMenu();
+  log(`config applied: mode=${cfg.mode} mic=${cfg.mic_device === null ? 'System Default' : cfg.mic_device}`);
+}
+
 if (!app.requestSingleInstanceLock()) {
   if (SMOKE) {
     console.log(JSON.stringify({ tray: false, engine_ready: false, engine: 'error', latency_ms: null, error: 'another instance is running' }));
@@ -108,6 +125,7 @@ async function onReady() {
     history,
     paste,
     windows,
+    onApply: (patch) => applyChange(patch),
     onQuit: () => app.quit(),
   });
 
@@ -132,14 +150,7 @@ async function onReady() {
   ipcMain.handle('settings:defaults', () => JSON.parse(JSON.stringify(config.DEFAULTS)));
   ipcMain.handle('engine:status:get', () => lastEngineStatus);
   ipcMain.handle('settings:save', async (e, cfg) => {
-    config.set(cfg || {});
-    try {
-      await engine.setFixes(config.get().pronunciation_fixes);
-    } catch (err) {
-      log(`set_fixes after save failed: ${err.message}`);
-    }
-    hotkey.applyConfig(config.get());
-    tray.rebuildMenu();
+    applyChange(cfg);
     return true;
   });
   ipcMain.handle('mics:list', async () => recorder.listMics());
@@ -150,6 +161,9 @@ async function onReady() {
     runSmoke();
   } else {
     log('ready');
+    // test/dev convenience (used by app/tools/ui_driver.js): open the settings
+    // window at startup so remote debugging can find it via /json
+    if (process.argv.includes('--open-settings')) windows.openSettings();
   }
 }
 
