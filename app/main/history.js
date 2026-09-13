@@ -9,6 +9,7 @@ function log(msg) {
 }
 
 let dataDirOverride = null;
+let config = null;
 
 function dataDir() {
   if (dataDirOverride) return dataDirOverride;
@@ -23,23 +24,21 @@ function setDataDir(dir) {
   dataDirOverride = dir;
 }
 
-function retentionMs() {
-  const hours = Number(config && config.history_retention_hours);
-  if (Number.isFinite(hours) && hours > 0) return hours * 3600 * 1000;
-  return 24 * 3600 * 1000; // default: keep 24 hours
+function setConfigRef(cfg) {
+  config = cfg;
 }
 
-// Pure: drops entries older than the retention window. `ts` is epoch ms
-// everywhere (Date.now()), so this is timezone-safe by construction.
-// Entries with a missing/non-numeric ts are kept (the history_max cap
-// bounds them) so a malformed line never silently nukes user data.
-function pruneEntries(entries, now = Date.now()) {
-  const cutoff = now - retentionMs();
-  return entries.filter((e) => {
-    const ts = Number(e && e.ts);
-    if (!Number.isFinite(ts)) return true;
-    return ts >= cutoff;
-  });
+function maxEntries() {
+  const max = Number(config && config.history_max);
+  if (Number.isFinite(max) && max > 0) return Math.floor(max);
+  return 50; // default: keep the last 50 dictations
+}
+
+// Pure: keeps only the newest `max` entries, rotating the oldest out first.
+// No time-based retention — history is only bounded by count.
+function capEntries(entries, max = maxEntries()) {
+  const limit = Math.max(1, max);
+  return entries.slice(-limit);
 }
 
 function readAll() {
@@ -74,52 +73,25 @@ function writeAll(entries) {
   }
 }
 
-// Prunes the on-disk file. Returns the number of lines removed (stale
-// entries plus corrupt/unparseable lines, which are rewritten away).
-// Called on startup, on every append, and on every history list query so
-// the file never grows unbounded between app launches.
-function pruneFile(now = Date.now()) {
-  const p = filePath();
-  let rawLines = [];
-  try {
-    if (fs.existsSync(p)) {
-      rawLines = fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
-    }
-  } catch (e) {
-    log(`read failed: ${e.message}`);
-    return 0;
-  }
-  const entries = [];
-  for (const line of rawLines) {
-    try {
-      entries.push(JSON.parse(line));
-    } catch (_) { /* skip corrupt line */ }
-  }
-  const kept = pruneEntries(entries, now);
-  if (kept.length !== rawLines.length) {
-    writeAll(kept);
-    log(`pruned ${rawLines.length - kept.length} lines older than ${Math.round(retentionMs() / 3600000)}h`);
-    return rawLines.length - kept.length;
-  }
-  return 0;
-}
-
 function append({ duration_ms, text }) {
-  const max = Math.max(1, (config && config.history_max) || 200);
-  const entries = pruneEntries(readAll());
+  const entries = readAll();
   entries.push({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     ts: Date.now(),
     duration_ms: Math.round(duration_ms || 0),
     text: String(text || ''),
   });
-  while (entries.length > max) entries.shift(); // oldest first (belt and braces)
-  writeAll(entries);
+  writeAll(capEntries(entries)); // rotate oldest out past the cap
 }
 
 function list(query) {
-  pruneFile();
   let entries = readAll();
+  const max = maxEntries();
+  if (entries.length > max) {
+    // config cap shrank since the last write — persist the trim
+    entries = capEntries(entries, max);
+    writeAll(entries);
+  }
   if (query && String(query).trim()) {
     const q = String(query).toLowerCase();
     entries = entries.filter((e) => (e.text || '').toLowerCase().includes(q));
@@ -137,18 +109,12 @@ function remove(id) {
   return false;
 }
 
-let config = null;
-function setConfigRef(cfg) {
-  config = cfg;
-}
-
 module.exports = {
   append,
   list,
   remove,
   setConfigRef,
   setDataDir,
-  pruneFile,
-  pruneEntries,
+  capEntries,
   filePath,
 };

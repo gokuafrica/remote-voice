@@ -54,7 +54,7 @@ button {
 
 .app {
   display: flex;
-  height: calc(100% - 52px); /* footer */
+  height: 100%;
 }
 
 /* ---------- Sidebar ---------- */
@@ -330,6 +330,27 @@ select {
 .btn.ghost:hover {
   background: rgba(255, 255, 255, 0.07);
   color: var(--text);
+}
+
+.btn.subtle {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.btn.subtle:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ---------- Reset row (General) ---------- */
+.reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 18px;
 }
 
 /* ---------- Hotkey ---------- */
@@ -608,30 +629,10 @@ body.capturing-hotkey #hotkey-capture {
   display: none !important;
 }
 
-/* ---------- Footer / toast ---------- */
-.footer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
-  padding: 0 30px;
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
-}
-
-.save-hint {
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
+/* ---------- Toast ---------- */
 .toast {
   position: fixed;
-  bottom: 66px;
+  bottom: 30px;
   right: 30px;
   background: #2e2e36;
   border: 1px solid var(--border-strong);
@@ -650,6 +651,46 @@ body.capturing-hotkey #hotkey-capture {
 .toast.show {
   opacity: 1;
   transform: none;
+}
+
+/* ---------- Reset confirm modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+}
+
+.modal-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+
+.modal-text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin-bottom: 18px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* Scrollbars */

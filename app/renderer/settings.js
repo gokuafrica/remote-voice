@@ -26,8 +26,6 @@
   const $ = (id) => document.getElementById(id);
 
   let config = null;
-  let dirty = false;
-  let saving = false;
 
   // ---------------------------------------------------------------- helpers
 
@@ -39,40 +37,62 @@
     toast._t = setTimeout(() => el.classList.remove('show'), 1800);
   }
 
-  function markDirty() {
-    if (!dirty) {
-      dirty = true;
-      $('save-hint').textContent = 'Unsaved changes';
-      $('save-btn').textContent = 'Save';
-    }
+  // ------------------------------------------------------------- autosave
+
+  // Every control change persists immediately: radios/dropdowns/toggles save
+  // instantly, text inputs debounce. Each save always sends the full collected
+  // config — idempotent, and matches the existing settingsSave contract.
+  let saveTimer = null;
+  let saving = false;
+  let resave = false;
+
+  function collect() {
+    config.hotkey = $('hotkey-display').textContent;
+    const mode = document.querySelector('input[name="mode"]:checked');
+    if (mode) config.mode = mode.value;
+    config.mic_device = $('mic-select').value === 'default' ? null : $('mic-select').value;
+    config.use_llm = $('use-llm').checked;
+    config.ollama_url = $('ollama-url').value.trim();
+    config.ollama_model = $('ollama-model').value.trim();
+    config.pronunciation_fixes = fixesToObject();
+    return { ...config };
   }
 
-  async function collectAndSave() {
-    if (!config || saving) return;
+  async function saveAll() {
+    if (!config) return;
+    if (saving) {
+      resave = true; // a change landed mid-save — run once more after
+      return;
+    }
     saving = true;
     try {
-      config.hotkey = $('hotkey-display').textContent;
-      const mode = document.querySelector('input[name="mode"]:checked');
-      if (mode) config.mode = mode.value;
-      config.mic_device = $('mic-select').value === 'default' ? null : $('mic-select').value;
-      config.use_llm = $('use-llm').checked;
-      config.ollama_url = $('ollama-url').value.trim();
-      config.ollama_model = $('ollama-model').value.trim();
-      config.pronunciation_fixes = fixesToObject();
-
-      await api.settingsSave({ ...config });
-      dirty = false;
-      $('save-hint').textContent = '';
-      $('save-btn').textContent = 'Saved ✓';
+      await api.settingsSave(collect());
       toast('Saved ✓');
-      setTimeout(() => { if (!dirty) $('save-btn').textContent = 'Save'; }, 1600);
     } catch (err) {
       console.error('[settings] save failed', err);
       toast('Save failed — see console');
-      markDirty();
     } finally {
       saving = false;
+      if (resave) {
+        resave = false;
+        scheduleSave(50);
+      }
     }
+  }
+
+  function scheduleSave(delay = 400) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      saveTimer = null;
+      await saveAll();
+    }, delay);
+  }
+
+  function flushSave() {
+    if (!saveTimer) return Promise.resolve();
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    return saveAll();
   }
 
   // ------------------------------------------------------------ navigation
@@ -81,7 +101,7 @@
   nav.addEventListener('click', async (e) => {
     const btn = e.target.closest('.nav-item');
     if (!btn) return;
-    if (dirty) await collectAndSave(); // auto-save on section switch
+    await flushSave(); // commit any debounced edit before leaving the section
     for (const item of nav.children) item.classList.toggle('active', item === btn);
     for (const panel of document.querySelectorAll('.panel')) {
       panel.classList.toggle('active', panel.id === `section-${btn.dataset.section}`);
@@ -164,7 +184,7 @@
       const str = hotkeyToString(e);
       if (!str) return finish();
       $('hotkey-display').textContent = str;
-      markDirty();
+      saveAll(); // instant: hotkey capture is a discrete action
       finish();
     }
 
@@ -182,15 +202,22 @@
 
   // ------------------------------------------------------------------ mode
 
+  for (const radio of document.querySelectorAll('input[name="mode"]')) {
+    radio.addEventListener('change', () => {
+      if (radio.checked) saveAll(); // instant: discrete control
+    });
+  }
+
   // ------------------------------------------------------------------- LLM
 
   $('use-llm').addEventListener('change', () => {
     $('llm-collapse').classList.toggle('open', $('use-llm').checked);
-    markDirty();
+    saveAll(); // instant: discrete control
   });
 
   for (const id of ['ollama-url', 'ollama-model']) {
-    $(id).addEventListener('input', markDirty);
+    $(id).addEventListener('input', () => scheduleSave(400));
+    $(id).addEventListener('blur', flushSave);
   }
 
   // ------------------------------------------------------------------- mic
@@ -225,7 +252,7 @@
 
   $('mic-select').addEventListener('change', () => {
     updateMicHint();
-    markDirty();
+    saveAll(); // instant: dropdown
   });
 
   // ------------------------------------------------------- replacement words
@@ -282,12 +309,12 @@
     del.title = 'Delete pair';
     del.setAttribute('aria-label', 'Delete pair');
 
-    wrongIn.addEventListener('input', () => { validateRow(wrongIn); markDirty(); });
-    correctIn.addEventListener('input', markDirty);
+    wrongIn.addEventListener('input', () => { validateRow(wrongIn); scheduleSave(400); });
+    correctIn.addEventListener('input', () => scheduleSave(400));
     del.addEventListener('click', () => {
       row.remove();
       if (!fixRows.children.length) renderFixEmpty();
-      markDirty();
+      saveAll(); // instant: discrete action
     });
 
     row.append(wrongIn, correctIn, del);
@@ -317,7 +344,6 @@
   $('fix-add').addEventListener('click', () => {
     const row = addFixRow();
     row.querySelector('input').focus();
-    markDirty();
   });
 
   $('import-btn').addEventListener('click', () => {
@@ -336,7 +362,7 @@
     $('import-text').value = '';
     if (added) {
       toast(`Imported ${added} pair${added === 1 ? '' : 's'}`);
-      markDirty();
+      saveAll(); // instant: bulk action
     } else {
       toast('No valid `wrong = correct` lines found');
     }
@@ -439,25 +465,48 @@
     searchTimer = setTimeout(refreshHistory, 250); // debounced
   });
 
-  // ------------------------------------------------------------------ save
+  // ------------------------------------------------------------ reset
 
-  $('save-btn').addEventListener('click', collectAndSave);
+  const resetModal = $('reset-modal');
 
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-      e.preventDefault();
-      collectAndSave();
+  function openResetModal() {
+    resetModal.classList.remove('hidden');
+    $('reset-cancel').focus();
+  }
+
+  function closeResetModal() {
+    resetModal.classList.add('hidden');
+  }
+
+  $('reset-btn').addEventListener('click', openResetModal);
+  $('reset-cancel').addEventListener('click', closeResetModal);
+  resetModal.addEventListener('click', (e) => {
+    if (e.target === resetModal) closeResetModal();
+  });
+
+  $('reset-confirm').addEventListener('click', async () => {
+    closeResetModal();
+    try {
+      await flushSave(); // never clobber a pending edit with stale values
+      const defaults = await api.settingsDefaults();
+      await api.settingsSave({ ...defaults }); // same persistence path as autosave
+      config = await api.settingsGet();
+      renderConfig();
+      await refreshMics(); // re-select device from the new config (System Default)
+      toast('Reset to defaults ✓');
+    } catch (err) {
+      console.error('[settings] reset failed', err);
+      toast('Reset failed — see console');
     }
   });
 
   window.addEventListener('beforeunload', () => {
-    if (dirty) collectAndSave(); // best-effort flush
+    if (saveTimer) flushSave(); // best-effort flush of a debounced edit
   });
 
   // ------------------------------------------------------------------ init
 
-  async function init() {
-    config = await api.settingsGet();
+  function renderConfig() {
     renderHotkey();
     const modeInput = document.querySelector(`input[name="mode"][value="${config.mode === 'push-to-talk' ? 'push-to-talk' : 'toggle'}"]`);
     if (modeInput) modeInput.checked = true;
@@ -466,10 +515,14 @@
     $('ollama-url').value = config.ollama_url || '';
     $('ollama-model').value = config.ollama_model || '';
     $('sample-rate').textContent = `${config.sample_rate || 16000} Hz`;
-    const hours = Number(config.history_retention_hours);
-    const shownHours = Number.isFinite(hours) && hours > 0 ? Math.round(hours) : 24;
-    $('history-retention-hint').textContent = `History is kept for ${shownHours} hours.`;
+    const cap = Number(config.history_max);
+    $('history-hint').textContent = `History keeps the last ${Number.isFinite(cap) && cap > 0 ? Math.round(cap) : 50} dictations.`;
     renderFixes(config.pronunciation_fixes);
+  }
+
+  async function init() {
+    config = await api.settingsGet();
+    renderConfig();
     // pull the current engine status so a window opened after the engine
     // became ready shows the true state instead of the static placeholder
     if (typeof api.engineStatusGet === 'function') {

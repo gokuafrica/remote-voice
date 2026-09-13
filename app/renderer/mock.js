@@ -7,12 +7,25 @@
 (() => {
   if (typeof window === 'undefined' || window.remotevoice) return;
 
-  const CONFIG = {
+  // Mirrors app/main/config.js DEFAULTS (source of truth lives there).
+  const DEFAULTS = {
     hotkey: 'right ctrl',
     mode: 'toggle',
     mic_device: null,
     sample_rate: 16000,
     voice_model: 'nemo-parakeet-tdt-0.6b-v2',
+    pronunciation_fixes: {},
+    overlay_position: 'bottom',
+    history_max: 50,
+    ollama_url: 'http://localhost:11434',
+    ollama_model: 'qwen2.5:3b',
+    cleanup_prompt: '',
+    use_llm: false,
+    python_cmd: null,
+  };
+
+  const CONFIG = {
+    ...DEFAULTS,
     pronunciation_fixes: {
       'new lion': 'new line',
       newline: 'new line',
@@ -27,12 +40,6 @@
       codecs: 'codex',
       eno: 'inu',
     },
-    overlay_position: 'cursor',
-    history_max: 200,
-    ollama_url: 'http://localhost:11434',
-    ollama_model: 'qwen2.5:3b',
-    cleanup_prompt: '',
-    use_llm: false,
   };
 
   const MICS = [
@@ -110,6 +117,10 @@
     async settingsSave(config) {
       Object.assign(CONFIG, config);
       return true;
+    },
+
+    async settingsDefaults() {
+      return JSON.parse(JSON.stringify(DEFAULTS));
     },
 
     async listMics() {

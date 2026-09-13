@@ -91,6 +91,10 @@
             </div>
           </div>
         </div>
+
+        <div class="reset-row">
+          <button id="reset-btn" class="btn subtle" title="Restore every setting to its default value">Reset to defaults</button>
+        </div>
       </section>
 
       <!-- Microphone -->
@@ -152,17 +156,26 @@
           <h1>History</h1>
           <input type="search" id="history-search" placeholder="Search history…" spellcheck="false" />
         </div>
-        <p class="hint" id="history-retention-hint">History is kept for 24 hours.</p>
+        <p class="hint" id="history-hint">History keeps the last 50 dictations.</p>
         <div id="history-list" class="history-list"></div>
         <div id="history-empty" class="empty hidden">No dictations yet — everything you dictate will appear here.</div>
       </section>
     </main>
   </div>
 
-  <footer class="footer">
-    <span id="save-hint" class="save-hint" role="status" aria-live="polite"></span>
-    <button id="save-btn" class="btn primary">Save</button>
-  </footer>
+  <div id="reset-modal" class="modal-backdrop hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+      <div class="modal-title" id="reset-modal-title">Reset to defaults?</div>
+      <div class="modal-text">
+        Every setting returns to its default — hotkey, mode, microphone,
+        replacement words and LLM options. Your history is kept.
+      </div>
+      <div class="modal-actions">
+        <button id="reset-cancel" class="btn">Cancel</button>
+        <button id="reset-confirm" class="btn primary">Reset</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

@@ -18,7 +18,9 @@ Provided by `app/preload.js` (owned by the shell agent):
 
 - `onOverlayState(cb)` — `cb({state:'recording'|'processing'|'hidden', level:0..1})`
 - `overlayCancel()` — user pressed Esc or clicked the pill
-- `settingsGet()` / `settingsSave(config)`
+- `settingsGet()` / `settingsSave(config)` / `settingsDefaults()` —
+  `settingsDefaults()` resolves to a deep copy of the main-process DEFAULTS
+  (from `app/main/config.js`); used by the Settings "Reset to defaults" button
 - `listMics()` — `Promise<[{id,label}]>`
 - `historyList(query)` / `historyDelete(id)`
 - `onEngineStatus(cb)` — `cb({ready, model, error})` pushed on every engine
@@ -57,13 +59,21 @@ overlay state cycle, fake config/mics/history, and a ready engine status.
   live in the engine; the UI only states them.
 - **History** — debounced searchable list (`historyList(query)`), relative time,
   duration, line-clamped text, copy + delete per row, empty state. A hint line
-  states the retention window ("History is kept for 24 hours.", driven by
-  `config.history_retention_hours`).
+  states the cap ("History keeps the last 50 dictations.", driven by
+  `config.history_max`).
 
-## Save flow
+## Save flow (autosave)
 
-Single footer **Save** button (also Ctrl+S), auto-save on section switch, and a
-best-effort flush on window close. "saved ✓" toast confirms each save.
+There is no Save button. Every control persists immediately through
+`settingsSave(config)` — radios/dropdowns/toggles/discrete actions save
+instantly, text inputs debounce (~400ms) and flush on blur or on section
+switch. A "Saved ✓" toast confirms each autosave.
+
+**Reset to defaults** (General section): in-page confirm modal →
+`settingsDefaults()` fetches the main-process DEFAULTS → `settingsSave(defaults)`
+writes them through the same persistence path (engine `set_fixes`, hotkey
+re-registration, tray rebuild happen in main) → the UI re-renders from the new
+config. History data is kept.
 
 ## Dev preview (no Electron needed)
 
