@@ -71,6 +71,10 @@ function positionOverlay() {
   const win = windows.overlay;
   if (!win || win.isDestroyed()) return;
   const cfg = windows.config.get();
+  const cursor = screen.getCursorScreenPoint();
+  // multi-monitor: use the display the cursor is currently on
+  const display = screen.getDisplayNearestPoint(cursor);
+  const wa = display.workArea;
   let pos;
   if (cfg.overlay_position === 'tray') {
     try {
@@ -79,15 +83,18 @@ function positionOverlay() {
     } catch (_) {
       pos = null;
     }
+  } else if (cfg.overlay_position === 'cursor') {
+    pos = { x: cursor.x - OVERLAY_SIZE.width / 2, y: cursor.y + 24 };
+  } else {
+    // default 'bottom': bottom-center of the cursor's display, just above the taskbar
+    pos = {
+      x: wa.x + Math.round((wa.width - OVERLAY_SIZE.width) / 2),
+      y: wa.y + wa.height - OVERLAY_SIZE.height - 18,
+    };
   }
-  if (!pos) {
-    const p = screen.getCursorScreenPoint();
-    pos = { x: p.x - OVERLAY_SIZE.width / 2, y: p.y + 24 };
-  }
-  const display = screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
-  const wa = display.workArea;
   pos.x = Math.max(wa.x + 8, Math.min(pos.x, wa.x + wa.width - OVERLAY_SIZE.width - 8));
   pos.y = Math.max(wa.y + 8, Math.min(pos.y, wa.y + wa.height - OVERLAY_SIZE.height - 8));
+  log(`overlay bounds: ${pos.x},${pos.y} (display ${display.bounds.x},${display.bounds.y} ${display.bounds.width}x${display.bounds.height}, mode ${cfg.overlay_position || 'bottom'})`);
   win.setPosition(pos.x, pos.y);
 }
 
@@ -129,6 +136,7 @@ function createSettings() {
     height: SETTINGS_SIZE.height,
     backgroundColor: '#1e1e1e',
     title: 'Remote Voice — Settings',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -137,6 +145,7 @@ function createSettings() {
   });
   windows.settings.loadFile(rendererPath('settings.html'));
   windows.settings.on('closed', () => { windows.settings = null; });
+  log('settings window created (menu: none)');
   return windows.settings;
 }
 
