@@ -27,7 +27,7 @@
       codecs: 'codex',
       eno: 'inu',
     },
-    overlay_position: 'cursor',
+    overlay_position: 'bottom',
     history_max: 200,
     ollama_url: 'http://localhost:11434',
     ollama_model: 'qwen2.5:3b',

@@ -61,6 +61,18 @@ function load() {
       }
       // migrate legacy int device index
       if (typeof config.mic_device === 'number') config.mic_device = null;
+      // One-time migration of legacy overlay_position: 'cursor' was the old
+      // hardcoded default and was never exposed as a Settings choice, so any
+      // persisted 'cursor' value came from an old seed, not from the user.
+      // Migrate it (and a missing value) to the new default 'bottom'. Tension:
+      // a user who later sets "cursor" by hand-editing config.json will be
+      // re-migrated on the next app start; that is accepted because 'cursor'
+      // was never a supported user-facing option in the current UI.
+      if (!config.overlay_position || config.overlay_position === 'cursor') {
+        log(`migrating overlay_position '${config.overlay_position || 'missing'}' -> 'bottom'`);
+        config.overlay_position = 'bottom';
+        saveNow();
+      }
       log(`loaded ${p}`);
     } else {
       config = { ...DEFAULTS };
@@ -73,6 +85,7 @@ function load() {
   }
   return config;
 }
+
 
 function get() {
   return config;
