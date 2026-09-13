@@ -1,8 +1,9 @@
 'use strict';
 
-const { uIOhook, UiohookKey, EventType } = require('uiohook-napi');
+const { uIOhook, UiohookKey } = require('uiohook-napi');
 
 const DEBOUNCE_MS = 30;
+const HOTKEY_LOG_THROTTLE_MS = 1000;
 
 function log(msg) {
   console.log(`[hotkey] ${msg}`);
@@ -87,6 +88,7 @@ class Hotkey {
     this.pressed = new Set();
     this.active = false;
     this.lastActivate = 0;
+    this.lastHotkeyLog = 0;
     this.handlers = null;
     this.running = false;
   }
@@ -95,11 +97,19 @@ class Hotkey {
     this.handlers = handlers;
     this.applyConfig(config);
     if (!this.running) {
-      uIOhook.on(EventType.EVENT_KEY_PRESSED, (e) => this._onKey(e, true));
-      uIOhook.on(EventType.EVENT_KEY_RELEASED, (e) => this._onKey(e, false));
-      uIOhook.start();
-      this.running = true;
-      log('global keyboard hook started');
+      // uiohook-napi's emitter only ever emits the string event names
+      // 'input'/'keydown'/'keyup' (its handler() maps e.type to names);
+      // subscribing with numeric EventType values never fires.
+      uIOhook.on('keydown', (e) => this._onKey(e, true));
+      uIOhook.on('keyup', (e) => this._onKey(e, false));
+      try {
+        uIOhook.start();
+        this.running = true;
+        log('global keyboard hook started (keydown/keyup listeners attached)');
+      } catch (e) {
+        this.running = false;
+        log(`global keyboard hook FAILED to start: ${e.message}`);
+      }
     }
   }
 
@@ -159,6 +169,16 @@ class Hotkey {
 
     if (isDown) this.pressed.add(e.keycode);
     else this.pressed.delete(e.keycode);
+
+    // throttled debug: any key event whose keycode participates in the combo
+    const isHotkeyKey = this.groups.some((g) => g.includes(e.keycode));
+    if (isHotkeyKey) {
+      const now = Date.now();
+      if (now - this.lastHotkeyLog >= HOTKEY_LOG_THROTTLE_MS) {
+        this.lastHotkeyLog = now;
+        log(`${isDown ? 'down' : 'up'} keycode=${e.keycode} held=[${[...this.pressed].join(',')}]`);
+      }
+    }
 
     // Esc cancels an active recording
     if (isDown && e.keycode === UiohookKey.Escape) {

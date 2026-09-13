@@ -97,6 +97,7 @@ function showOverlay() {
   positionOverlay();
   win.showInactive();
   win.webContents.send('overlay:state', { state: 'recording', level: 0 });
+  log('overlay shown');
 }
 
 function hideOverlay() {
@@ -104,6 +105,7 @@ function hideOverlay() {
   if (win && !win.isDestroyed()) {
     win.webContents.send('overlay:state', { state: 'hidden', level: 0 });
     win.hide();
+    log('overlay hidden');
   }
 }
 

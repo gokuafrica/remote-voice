@@ -100,7 +100,7 @@ def save_config() -> None:
 
 
 def compile_pronunciation_fixes(fixes: dict) -> list[tuple[re.Pattern, str]]:
-    """Compile a {mispronunciation: correction} dict into regex patterns.
+    r"""Compile a {mispronunciation: correction} dict into regex patterns.
 
     Each multi-word key gets ``[,.\s-]+`` between words (handles Parakeet
     commas, periods, and hyphens) and ``\b`` word boundaries (prevents

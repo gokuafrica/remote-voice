@@ -168,9 +168,10 @@ async function stopRecording() {
     }
     const resp = await engine.transcribe(result.path);
     const text = (resp.text || '').trim();
-    log(`transcribed: ${text.slice(0, 120)}`);
+    log(`transcribe result: ${text.length} chars: ${text.slice(0, 120)}`);
     if (text) {
-      await paste.pasteText(text);
+      const pasted = await paste.pasteText(text);
+      log(`paste attempt result: ${pasted ? 'ok' : 'failed'}`);
     }
     history.append({ duration_ms: result.durationMs, text });
     state.set('IDLE', { reason: 'done', flash: true });
