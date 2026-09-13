@@ -1,6 +1,6 @@
 # app/renderer — UI layer
 
-Visible renderer files for the Spokenly-v2 Electron app. No build step, no framework — plain HTML/CSS/JS.
+Visible renderer files for the Remote Voice Electron app. No build step, no framework — plain HTML/CSS/JS.
 
 ## Files
 
@@ -8,11 +8,11 @@ Visible renderer files for the Spokenly-v2 Electron app. No build step, no frame
 |---|---|---|
 | `overlay.html/css/js` | recording overlay | Frameless always-on-top pill (~240x60) shown near the cursor while dictating |
 | `settings.html/css/js` | settings | Main settings window (~940x680) |
-| `mock.js` | both (dev only) | Fake `window.spokenly` bridge so the pages render standalone in a browser |
+| `mock.js` | both (dev only) | Fake `window.remotevoice` bridge so the pages render standalone in a browser |
 
 `recorder.*` (hidden recorder window) is owned by the shell agent — not part of the UI scope.
 
-## Preload API contract (`window.spokenly`)
+## Preload API contract (`window.remotevoice`)
 
 Provided by `app/preload.js` (owned by the shell agent):
 
@@ -23,7 +23,7 @@ Provided by `app/preload.js` (owned by the shell agent):
 - `historyList(query)` / `historyDelete(id)`
 - `onEngineStatus(cb)` — `cb({ready, model, error})`
 
-If `window.spokenly` is missing (dev/browser), `overlay.js` and `settings.js`
+If `window.remotevoice` is missing (dev/browser), `overlay.js` and `settings.js`
 synchronously load `mock.js`, which installs a working fake bridge: a demo
 overlay state cycle, fake config/mics/history, and a ready engine status.
 

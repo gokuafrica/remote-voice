@@ -128,7 +128,7 @@ function createSettings() {
     width: SETTINGS_SIZE.width,
     height: SETTINGS_SIZE.height,
     backgroundColor: '#1e1e1e',
-    title: 'Spokenly V2 — Settings',
+    title: 'Remote Voice — Settings',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,

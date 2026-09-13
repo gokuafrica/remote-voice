@@ -175,7 +175,7 @@ class Recorder {
     const pcm = Buffer.concat(frames);
     const durationMs = Math.round((pcm.length / 2 / 16000) * 1000);
     const wav = encodeWav(pcm, 16000, 1);
-    const wavPath = path.join(os.tmpdir(), `spokenly-${Date.now()}.wav`);
+    const wavPath = path.join(os.tmpdir(), `remote-voice-${Date.now()}.wav`);
     fs.writeFileSync(wavPath, wav);
     log(`wav written: ${wavPath} (${pcm.length} pcm bytes, ${durationMs}ms, started with ${startFramesLen} frames)`);
     return { path: wavPath, durationMs, bytes: wav.length };

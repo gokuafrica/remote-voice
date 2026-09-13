@@ -2,6 +2,8 @@
 
 const { app, ipcMain, session } = require('electron');
 
+app.setName('Remote Voice');
+
 const config = require('./config');
 const state = require('./state');
 const engine = require('./engine');
@@ -17,6 +19,28 @@ const SMOKE_TIMEOUT_MS = 30000;
 
 function log(msg) {
   console.log(`[main] ${msg}`);
+}
+
+// One-time migration from the old %APPDATA%/SpokenlyV2 data dir (best effort).
+function migrateLegacyData() {
+  const fs = require('fs');
+  const path = require('path');
+  try {
+    const oldDir = path.join(app.getPath('appData'), 'SpokenlyV2');
+    const newDir = path.join(app.getPath('appData'), 'Remote Voice');
+    if (!fs.existsSync(oldDir)) return;
+    fs.mkdirSync(newDir, { recursive: true });
+    for (const name of ['history.jsonl', 'config.json']) {
+      const src = path.join(oldDir, name);
+      const dst = path.join(newDir, name);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        fs.copyFileSync(src, dst);
+        log(`migrated legacy ${name} from SpokenlyV2`);
+      }
+    }
+  } catch (e) {
+    log(`legacy data migration failed: ${e.message}`);
+  }
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -44,6 +68,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function onReady() {
+  migrateLegacyData();
   config.load();
   history.setConfigRef(config.get());
 

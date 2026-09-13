@@ -1,11 +1,11 @@
 'use strict';
 
-// Dev-only fake `window.spokenly`. Loaded automatically by overlay.js and
+// Dev-only Fake `window.remotevoice`. Loaded automatically by overlay.js and
 // settings.js when the real preload bridge is missing (e.g. opening the HTML
 // files directly in a browser). Never present in a packaged app.
 
 (() => {
-  if (typeof window === 'undefined' || window.spokenly) return;
+  if (typeof window === 'undefined' || window.remotevoice) return;
 
   const CONFIG = {
     hotkey: 'right ctrl',
@@ -76,7 +76,7 @@
     tickTimer = setInterval(tick, 80);
   }
 
-  window.spokenly = {
+  window.remotevoice = {
     onOverlayState(cb) {
       stateListeners.add(cb);
       if (mockState === 'hidden') {
@@ -137,5 +137,5 @@
     },
   };
 
-  console.info('[spokenly] using dev mock bridge');
+  console.info('[remotevoice] using dev mock bridge');
 })();

@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  if (!window.spokenly) {
+  if (!window.remotevoice) {
     // Dev/browser mode: load the mock bridge synchronously via XHR so the
     // rest of this file runs identically to the real Electron environment.
     try {
@@ -17,12 +17,12 @@
     }
   }
 
-  if (!window.spokenly) {
-    console.error('[overlay] no spokenly bridge and no mock; overlay idle');
+  if (!window.remotevoice) {
+    console.error('[overlay] no remotevoice bridge and no mock; overlay idle');
     return;
   }
 
-  const api = window.spokenly;
+  const api = window.remotevoice;
 
   const body = document.body;
   const pill = document.getElementById('pill');

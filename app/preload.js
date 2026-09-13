@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('spokenly', {
+contextBridge.exposeInMainWorld('remotevoice', {
   onOverlayState(cb) {
     ipcRenderer.on('overlay:state', (e, payload) => cb(payload));
   },

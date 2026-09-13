@@ -55,7 +55,7 @@ Stdio, one JSON object per line.
 }
 ```
 Seeded at first run from `master/config.json` (pronunciation_fixes) and `master/tray_config.json`
-(hotkey/mode/mic_device/sample_rate). Stored in `%APPDATA%/SpokenlyV2/config.json` when packaged;
+(hotkey/mode/mic_device/sample_rate). Stored in `%APPDATA%/Remote Voice/config.json` when packaged;
 beside the app in dev.
 
 ## Work split (one agent branch each, merged into `rework/spokenly-v2`)

@@ -9,7 +9,7 @@ function log(msg) {
 }
 
 function filePath() {
-  const dir = path.join(app.getPath('appData'), 'SpokenlyV2');
+  const dir = path.join(app.getPath('appData'), 'Remote Voice');
   return path.join(dir, 'history.jsonl');
 }
 

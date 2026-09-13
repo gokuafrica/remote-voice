@@ -31,7 +31,7 @@ function log(msg) {
 function configPath() {
   if (!_path) {
     if (app.isPackaged) {
-      _path = path.join(app.getPath('appData'), 'SpokenlyV2', 'config.json');
+      _path = path.join(app.getPath('appData'), 'Remote Voice', 'config.json');
     } else {
       // dev: worktree root (app/main/config.js -> app/..)
       _path = path.join(__dirname, '..', '..', 'config.json');

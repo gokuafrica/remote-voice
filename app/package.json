@@ -1,6 +1,7 @@
 {
-  "name": "spokenly-v2",
-  "productName": "Spokenly V2",
+  "name": "remote-voice",
+  "productName": "Remote Voice",
+  "author": "Remote Voice",
   "version": "0.1.0",
   "private": true,
   "description": "Windows voice dictation - Electron shell with embedded Python engine sidecar",

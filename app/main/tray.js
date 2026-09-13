@@ -63,7 +63,7 @@ class TrayIcon {
     }
     this.icons.success = drawIcon('success');
     this.tray = new Tray(this.icons.IDLE);
-    this.tray.setToolTip('Spokenly V2 — Idle');
+    this.tray.setToolTip('Remote Voice — Idle');
     this.rebuildMenu();
     deps.state.on('change', (next, prev, meta) => this._onState(next, meta));
     this.refreshMics();
@@ -88,18 +88,18 @@ class TrayIcon {
     this._cancelFlash();
     const icon = this.icons[next] || this.icons.IDLE;
     this.tray.setImage(icon);
-    this.tray.setToolTip(`Spokenly V2 — ${next.charAt(0)}${next.slice(1).toLowerCase()}`);
+    this.tray.setToolTip(`Remote Voice — ${next.charAt(0)}${next.slice(1).toLowerCase()}`);
   }
 
   _flashSuccess() {
     this._cancelFlash();
     this.tray.setImage(this.icons.success);
-    this.tray.setToolTip('Spokenly V2 — Done');
+    this.tray.setToolTip('Remote Voice — Done');
     this.flashTimer = setTimeout(() => {
       this.flashTimer = null;
       if (this.tray && this.deps.state.current === 'IDLE') {
         this.tray.setImage(this.icons.IDLE);
-        this.tray.setToolTip('Spokenly V2 — Idle');
+        this.tray.setToolTip('Remote Voice — Idle');
       }
     }, 500);
   }

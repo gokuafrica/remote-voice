@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// internal preload for the hidden recorder page (not the public spokenly API)
+// internal preload for the hidden recorder page (not the public remotevoice API)
 contextBridge.exposeInMainWorld('recorderBridge', {
   onRecStart(cb) {
     ipcRenderer.on('rec:start', (e, payload) => cb(payload));

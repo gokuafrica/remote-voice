@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  if (!window.spokenly) {
+  if (!window.remotevoice) {
     // Dev/browser mode: load the mock bridge synchronously via XHR so this
     // page renders standalone in a plain browser.
     try {
@@ -17,12 +17,12 @@
     }
   }
 
-  if (!window.spokenly) {
-    console.error('[settings] no spokenly bridge and no mock');
+  if (!window.remotevoice) {
+    console.error('[settings] no remotevoice bridge and no mock');
     return;
   }
 
-  const api = window.spokenly;
+  const api = window.remotevoice;
   const $ = (id) => document.getElementById(id);
 
   let config = null;
