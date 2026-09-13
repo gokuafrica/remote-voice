@@ -95,7 +95,7 @@ function saveNow() {
   const p = configPath();
   try {
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(config, null, 4));
+      fs.writeFileSync(p, JSON.stringify(config, null, 4) + '\n');
   } catch (e) {
     log(`save failed: ${e.message}`);
   }
