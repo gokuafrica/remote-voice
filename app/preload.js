@@ -27,4 +27,7 @@ contextBridge.exposeInMainWorld('remotevoice', {
   onEngineStatus(cb) {
     ipcRenderer.on('engine:status', (e, payload) => cb(payload));
   },
+  engineStatusGet() {
+    return ipcRenderer.invoke('engine:status:get');
+  },
 });

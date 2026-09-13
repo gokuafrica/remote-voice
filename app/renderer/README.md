@@ -21,7 +21,13 @@ Provided by `app/preload.js` (owned by the shell agent):
 - `settingsGet()` / `settingsSave(config)`
 - `listMics()` — `Promise<[{id,label}]>`
 - `historyList(query)` / `historyDelete(id)`
-- `onEngineStatus(cb)` — `cb({ready, model, error})`
+- `onEngineStatus(cb)` — `cb({ready, model, error})` pushed on every engine
+  state change
+- `engineStatusGet()` — `Promise<{ready, model, error}>` snapshot of the
+  latest engine status, cached in main. Settings calls this once on load so a
+  window opened after the engine became ready shows the true state instead of
+  the static "Loading" placeholder (push-only delivery would miss every
+  transition that happened before the window existed).
 
 If `window.remotevoice` is missing (dev/browser), `overlay.js` and `settings.js`
 synchronously load `mock.js`, which installs a working fake bridge: a demo
@@ -50,7 +56,9 @@ overlay state cycle, fake config/mics/history, and a ready engine status.
   `wrong = correct` lines. Matching semantics (case-insensitive word-boundary)
   live in the engine; the UI only states them.
 - **History** — debounced searchable list (`historyList(query)`), relative time,
-  duration, line-clamped text, copy + delete per row, empty state.
+  duration, line-clamped text, copy + delete per row, empty state. A hint line
+  states the retention window ("History is kept for 24 hours.", driven by
+  `config.history_retention_hours`).
 
 ## Save flow
 
