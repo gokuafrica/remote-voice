@@ -1,0 +1,14 @@
+# Engine sidecar dependencies (embedded Python 3.11 runtime, bundled by
+# packaging/build_installer.ps1). Keep minimal — the Electron shell replaced
+# the old FastAPI/GUI stack, so no server/GUI packages here.
+#
+# onnxruntime-gpu is hard-pinned to 1.24.4: newer releases target CUDA 13,
+# which the nvidia-*-cu12 wheels (installed separately by the build script)
+# do not provide.
+onnx-asr==0.12.0
+onnxruntime-gpu==1.24.4
+# onnx-asr resolves cached models through huggingface_hub (optional dep upstream,
+# required here because the bundled runtime must load offline from HF_HOME).
+huggingface_hub
+httpx
+word2number

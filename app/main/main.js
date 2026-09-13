@@ -22,7 +22,9 @@ const windows = require('./windows');
 const history = require('./history');
 
 const SMOKE = process.argv.includes('--smoke');
-const SMOKE_TIMEOUT_MS = 30000;
+// First packaged run also seeds the ~2.4 GB model cache from resources and
+// loads Parakeet into VRAM — 30s was not enough for a cold start.
+const SMOKE_TIMEOUT_MS = 120000;
 
 // Smoke runs headless CI-style: isolate its userData so a dev instance the
 // user (or another build) is running can never block the single-instance lock.
@@ -310,7 +312,7 @@ function runSmoke() {
       engine_ready: engine.ready,
       engine: 'error',
       latency_ms: null,
-      error: 'smoke timeout after 30s',
+      error: `smoke timeout after ${Math.round(SMOKE_TIMEOUT_MS / 1000)}s`,
     });
   }, SMOKE_TIMEOUT_MS);
 

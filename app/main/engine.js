@@ -54,6 +54,48 @@ class Engine extends EventEmitter {
     return path.join(__dirname, '..', '..'); // worktree root
   }
 
+  // Per-user writable HF cache. Program Files is read-only for the cache's
+  // lock/atomic-rename traffic, so the engine must never download there —
+  // HF_HOME/HUGGINGFACE_HUB_CACHE for the engine process point here.
+  modelCacheDir() {
+    const base = process.env.LOCALAPPDATA || app.getPath('appData');
+    return path.join(base, 'Remote Voice', 'model-cache');
+  }
+
+  // One-time seed: copy the bundled hf_cache (from resources) into the
+  // per-user model cache. Non-overwriting — an existing cache (previous
+  // seed, or a newer download) always wins.
+  seedModelCache() {
+    const dst = this.modelCacheDir();
+    const marker = path.join(dst, '.seeded');
+    if (fs.existsSync(marker)) return dst;
+    const src = app.isPackaged
+      ? path.join(process.resourcesPath, 'hf_cache')
+      : path.join(__dirname, '..', '..', 'packaging', 'stage', 'hf_cache');
+    if (!fs.existsSync(src)) {
+      log(`no bundled model cache at ${src} — engine will use/extend ${dst}`);
+      return dst;
+    }
+    try {
+      fs.mkdirSync(dst, { recursive: true });
+      fs.cpSync(src, dst, { recursive: true, force: false, errorOnExist: false });
+      fs.writeFileSync(marker, new Date().toISOString() + '\n');
+      log(`seeded model cache ${dst} from ${src}`);
+    } catch (e) {
+      log(`model cache seed failed (${e.message}) — continuing with ${dst}`);
+    }
+    return dst;
+  }
+
+  spawnEnv() {
+    const cache = this.seedModelCache();
+    return {
+      ...process.env,
+      HF_HOME: cache,
+      HUGGINGFACE_HUB_CACHE: path.join(cache, 'hub'),
+    };
+  }
+
   _setStatus(ready, model, error) {
     this.ready = ready;
     this.model = model !== undefined ? model : this.model;
@@ -62,15 +104,33 @@ class Engine extends EventEmitter {
   }
 
   _candidates(config) {
+    // config.python_cmd override wins over everything.
     if (config && config.python_cmd) {
       const parsed = parsePythonCmd(String(config.python_cmd));
       if (parsed) return [parsed];
     }
-    return [
+    const candidates = [];
+    if (app.isPackaged) {
+      // Bundled runtime first: <resources>\python311\python.exe, installed by
+      // the setup. Its site-packages carry every engine dependency, so the
+      // app works on a clean machine without a system Python.
+      candidates.push({
+        cmd: path.join(process.resourcesPath, 'python311', 'python.exe'),
+        prefix: [],
+      });
+    } else {
+      // Dev: use the build staging tree if present (packaging\stage\python311),
+      // so dev exercises the same runtime the installer ships.
+      const stagePy = path.join(__dirname, '..', '..', 'packaging', 'stage', 'python311', 'python.exe');
+      if (fs.existsSync(stagePy)) candidates.push({ cmd: stagePy, prefix: [] });
+    }
+    // System fallbacks (dev machines / installs without the bundled runtime).
+    candidates.push(
       { cmd: 'python', prefix: [] },
       { cmd: 'py', prefix: ['-3.14'] },
       { cmd: 'py', prefix: ['-3.11'] },
-    ];
+    );
+    return candidates;
   }
 
   start(config) {
@@ -101,6 +161,7 @@ class Engine extends EventEmitter {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         cwd: this.workDir(),
+        env: this.spawnEnv(),
       });
     } catch (e) {
       log(`spawn failed for ${cand.cmd}: ${e.message}`);

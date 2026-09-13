@@ -1,14 +1,16 @@
 'use strict';
 
-// One-shot packaging script: builds dist\Remote Voice-win32-x64.
-// Usage: node ..\packaging\package_app.js   (or: npm run package)
+// One-shot packaging script: builds the packaged app dir.
+// Usage: node ..\packaging\package_app.js [outDir]
+//   outDir defaults to dist\ (npm run package); the installer build passes
+//   packaging\stage\_pkg so it can package while a dist\ build is running.
 // engine/ and a seed config.json are bundled via extraResource.
 
 const path = require('path');
 const { packager } = require(path.join(__dirname, '..', 'app', 'node_modules', '@electron/packager'));
 
 const appDir = path.join(__dirname, '..', 'app');
-const outDir = path.join(appDir, '..', 'dist');
+const outDir = process.argv[2] || path.join(appDir, '..', 'dist');
 
 packager({
   dir: appDir,
