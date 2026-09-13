@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+  <title>Spokenly Settings</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span class="brand-name">Spokenly</span>
+      </div>
+      <nav class="nav" id="nav">
+        <button class="nav-item active" data-section="general">General</button>
+        <button class="nav-item" data-section="microphone">Microphone</button>
+        <button class="nav-item" data-section="fixes">Replacement words</button>
+        <button class="nav-item" data-section="history">History</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="engine-status" class="engine-status">Engine: checking…</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- General -->
+      <section class="panel active" id="section-general">
+        <h1>General</h1>
+
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <div class="row-title">Hotkey</div>
+              <div class="row-sub">Trigger dictation from anywhere.</div>
+            </div>
+            <div class="row-control hotkey-row">
+              <kbd id="hotkey-display" class="hotkey-display">—</kbd>
+              <button id="hotkey-capture" class="btn">Record new hotkey</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <div class="row-title">Activation mode</div>
+              <div class="row-sub">How the hotkey starts and stops recording.</div>
+            </div>
+            <div class="row-control radios" id="mode-radios">
+              <label class="radio"><input type="radio" name="mode" value="push-to-talk" /> Push to talk</label>
+              <label class="radio"><input type="radio" name="mode" value="toggle" /> Toggle</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <div class="row-title">Use LLM cleanup</div>
+              <div class="row-sub">Run an optional Ollama model over finished transcripts. Advanced.</div>
+            </div>
+            <div class="row-control">
+              <label class="switch">
+                <input type="checkbox" id="use-llm" />
+                <span class="slider" aria-hidden="true"></span>
+              </label>
+            </div>
+          </div>
+          <div class="collapse" id="llm-collapse">
+            <div class="field">
+              <label for="ollama-url">Ollama URL</label>
+              <input type="text" id="ollama-url" spellcheck="false" placeholder="http://localhost:11434" />
+            </div>
+            <div class="field">
+              <label for="ollama-model">Model</label>
+              <input type="text" id="ollama-model" spellcheck="false" placeholder="qwen2.5:3b" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <div class="row-title">Engine</div>
+              <div class="row-sub" id="engine-model">Loading…</div>
+            </div>
+            <div class="row-control">
+              <span id="engine-indicator" class="engine-indicator">checking…</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Microphone -->
+      <section class="panel" id="section-microphone">
+        <h1>Microphone</h1>
+        <div class="card">
+          <div class="field">
+            <label for="mic-select">Input device</label>
+            <select id="mic-select"></select>
+            <div class="hint" id="mic-hint">Loading devices…</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <div class="row-title">Sample rate</div>
+              <div class="row-sub">Audio is captured at this rate and fed to the engine.</div>
+            </div>
+            <div class="row-control"><code class="mono" id="sample-rate">16000 Hz</code></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Replacement words -->
+      <section class="panel" id="section-fixes">
+        <div class="panel-head">
+          <h1>Replacement words</h1>
+          <button id="fix-add" class="btn">+ Add pair</button>
+        </div>
+        <p class="hint">
+          Each pair rewrites a misheard word or phrase before cleanup. Matching is
+          <b>case-insensitive</b> on whole words/phrase boundaries (hyphenated and
+          comma-spliced variants included), longest match first.
+        </p>
+        <div class="card table-card">
+          <div class="fix-table" id="fix-table">
+            <div class="fix-head">
+              <span>Wrong (what you say)</span>
+              <span>Correct (what you meant)</span>
+              <span></span>
+            </div>
+            <div id="fix-rows"></div>
+          </div>
+        </div>
+
+        <details class="import-details" id="import-details">
+          <summary>Bulk import</summary>
+          <div class="hint">Paste lines in <code>wrong = correct</code> form, one per line.</div>
+          <textarea id="import-text" rows="5" spellcheck="false" placeholder="new lion = new line&#10;coma = comma"></textarea>
+          <div class="import-actions">
+            <button id="import-btn" class="btn">Import lines</button>
+          </div>
+        </details>
+      </section>
+
+      <!-- History -->
+      <section class="panel" id="section-history">
+        <div class="panel-head">
+          <h1>History</h1>
+          <input type="search" id="history-search" placeholder="Search history…" spellcheck="false" />
+        </div>
+        <div id="history-list" class="history-list"></div>
+        <div id="history-empty" class="empty hidden">No dictations yet — everything you dictate will appear here.</div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <span id="save-hint" class="save-hint" role="status" aria-live="polite"></span>
+    <button id="save-btn" class="btn primary">Save</button>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
