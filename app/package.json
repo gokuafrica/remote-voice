@@ -1,0 +1,19 @@
+{
+  "name": "spokenly-v2",
+  "productName": "Spokenly V2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows voice dictation - Electron shell with embedded Python engine sidecar",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke"
+  },
+  "devDependencies": {
+    "electron": "latest"
+  },
+  "dependencies": {
+    "koffi": "^2.14.1",
+    "uiohook-napi": "^1.5.3"
+  }
+}
