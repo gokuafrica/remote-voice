@@ -226,13 +226,22 @@
     const sel = $('mic-select');
     try {
       const mics = await api.listMics();
-      const current = config.mic_device || 'default';
+      const current = config.mic_device || null;
       sel.innerHTML = '';
+      // "System Default" must always be present; the tray stores null for it
+      const defOpt = document.createElement('option');
+      defOpt.value = 'default';
+      defOpt.textContent = 'System Default';
+      if (!current) defOpt.selected = true;
+      sel.appendChild(defOpt);
+      // The main process identifies mics by LABEL (recorder matchDevice and
+      // the tray both compare labels), so the option value is the label, not
+      // the deviceId.
       for (const m of mics) {
         const opt = document.createElement('option');
-        opt.value = m.id;
+        opt.value = m.label;
         opt.textContent = m.label;
-        if (m.id === current || (m.id === 'default' && !config.mic_device)) opt.selected = true;
+        if (m.label && m.label === current) opt.selected = true;
         sel.appendChild(opt);
       }
       updateMicHint();
@@ -508,7 +517,7 @@
 
   function renderConfig() {
     renderHotkey();
-    const modeInput = document.querySelector(`input[name="mode"][value="${config.mode === 'push-to-talk' ? 'push-to-talk' : 'toggle'}"]`);
+    const modeInput = document.querySelector(`input[name="mode"][value="${config.mode === 'push_to_talk' ? 'push_to_talk' : 'toggle'}"]`);
     if (modeInput) modeInput.checked = true;
     $('use-llm').checked = !!config.use_llm;
     $('llm-collapse').classList.toggle('open', !!config.use_llm);

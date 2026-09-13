@@ -80,3 +80,19 @@ config. History data is kept.
 Open `settings.html` or `overlay.html` directly in a browser — the mock bridge
 loads automatically. The overlay mock cycles hidden → recording (6s) →
 processing (1.5s) → hidden.
+
+## UI regression driver (`app/tools/ui_driver.js`)
+
+Drives the REAL settings window of a running app over the Chrome DevTools
+Protocol (no mocks) — used to verify that settings changes made through the
+actual UI reach config persistence:
+
+```
+npm start -- --remote-debugging-port=9222 --open-settings
+node tools/ui_driver.js read          # current settings UI state as JSON
+node tools/ui_driver.js set --mode push_to_talk --mic default
+node tools/ui_driver.js wait          # block until the settings target exists
+```
+
+`set` clicks the real radio / changes the real dropdown (same autosave handlers
+a user triggers), captures the "Saved ✓" toast, and prints the resulting state.

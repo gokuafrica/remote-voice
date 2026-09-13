@@ -97,15 +97,16 @@ class TrayIcon {
     const cfg = config.get();
     const modeLabel = cfg.mode === 'push_to_talk' ? 'hold' : 'toggle';
 
+    // apply via the SAME main-process path the settings window uses
+    // (deps.onApply -> applyChange: persists, re-registers hotkey, rebuilds
+    // this menu) so the two paths can never diverge.
     const setMode = (mode) => () => {
-      config.set({ mode });
       log(`mode -> ${mode}`);
-      this.rebuildMenu();
+      this.deps.onApply({ mode });
     };
     const setMic = (name) => () => {
-      config.set({ mic_device: name });
       log(`mic -> ${name === null ? 'System Default' : name}`);
-      this.rebuildMenu();
+      this.deps.onApply({ mic_device: name });
     };
 
     const micItems = [
@@ -161,6 +162,7 @@ class TrayIcon {
       },
     ]);
     this.tray.setContextMenu(menu);
+    log(`menu rebuilt: mode=${modeLabel}, mic=${cfg.mic_device === null ? 'System Default' : cfg.mic_device}`);
   }
 
   destroy() {
