@@ -32,6 +32,10 @@ const INPUT_KEYBOARD = 1;
 const OPEN_RETRIES = 5;
 const RETRY_DELAY_MS = 20;
 
+// NOTE: Electron >= 44 made the main-process clipboard API async
+// (readText/writeText return Promises; no image API in main). Feeding a
+// Promise object back into writeText is the "conversion failure" error.
+
 function log(msg) {
   console.log(`[paste] ${msg}`);
 }
@@ -85,29 +89,21 @@ function seq() {
   }
 }
 
-function snapshotClipboard() {
-  const snap = { text: null, image: null };
+async function snapshotClipboard() {
+  const snap = { text: null };
   try {
-    const text = clipboard.readText();
+    const text = await clipboard.readText();
     if (text) snap.text = text;
-  } catch (_) { /* ignore */ }
-  try {
-    const img = clipboard.readImage();
-    if (img && !img.isEmpty()) snap.image = img;
-  } catch (_) { /* ignore */ }
+  } catch (e) {
+    log(`clipboard read failed: ${e.message}`);
+  }
   return snap;
 }
 
 async function restoreClipboard(snap) {
   const done = await retry(async () => {
-    if (snap.text !== null) {
-      clipboard.writeText(snap.text);
-      if (snap.image) clipboard.writeImage(snap.image);
-    } else if (snap.image) {
-      clipboard.writeImage(snap.image);
-    } else {
-      clipboard.clear();
-    }
+    if (snap.text !== null) await clipboard.writeText(snap.text);
+    else await clipboard.clear();
     return true;
   }, 'clipboard restore');
   if (done) log('clipboard restored');
@@ -127,10 +123,10 @@ async function pasteText(text, { preDelayMs = 250 } = {}) {
     if (preDelayMs > 0) await sleep(preDelayMs);
 
     const seqBefore = seq();
-    const snap = snapshotClipboard();
+    const snap = await snapshotClipboard();
 
     const wrote = await retry(async () => {
-      clipboard.writeText(text);
+      await clipboard.writeText(text);
       return true;
     }, 'clipboard write');
     if (!wrote) {
@@ -147,9 +143,6 @@ async function pasteText(text, { preDelayMs = 250 } = {}) {
     if (seqAfterWrite && seqNow && seqNow !== seqAfterWrite) {
       log('clipboard changed during paste — skipping restore');
       return true;
-    }
-    if (seqBefore && seqNow && seqNow === seqBefore && (snap.text !== null || snap.image)) {
-      // target app never consumed the paste; restore anyway to be safe
     }
     await restoreClipboard(snap);
     return true;
