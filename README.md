@@ -533,3 +533,26 @@ python engine\smoke_client.py    # spawns engine like the Electron shell will: p
 - If the model fails to load, the engine still runs and reports
   `ready: false` + `error` on `ping`; `transcribe` returns `ok: false`.
 - stdin EOF or a `shutdown` op ends the engine with exit code 0.
+
+## Running the Remote Voice app (Electron + engine sidecar)
+
+The rebuilt app lives in `app/` (Electron shell) with the Python engine sidecar
+in `engine/`. Data is stored in `%APPDATA%/Remote Voice/`.
+
+### Run from source (recommended)
+
+1. One-time install: open a terminal in `app/` and run `npm install`.
+2. Double-click `Remote Voice.bat` (repo root) - or use the `Remote Voice`
+   desktop shortcut. It starts the app detached with no console window;
+   a second launch while the app is running just focuses the existing app.
+   If `node_modules` is missing, the launcher shows a message telling you to
+   run `npm install` once instead of failing silently.
+
+### Packaged exe (optional)
+
+`npm run package` (in `app/`) builds `dist\Remote Voice-win32-x64\Remote Voice.exe`
+via `@electron/packager`, bundling `engine/` and a seed `config.json` as
+resources. The packaged exe still requires a system `python` with the engine
+dependencies (`onnx_asr`, `onnxruntime-gpu` (CUDA), `word2number`, `httpx`) on
+PATH or set as `python_cmd` in `%APPDATA%/Remote Voice/config.json` - the
+Python engine is NOT bundled into the exe.

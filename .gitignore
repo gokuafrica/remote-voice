@@ -14,3 +14,6 @@ distributable/
 # Electron app build artifacts
 app/node_modules/
 app/package-lock.json
+
+# Electron packager output
+dist/

@@ -4,6 +4,7 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { app } = require('electron');
 
 const PROBE_TIMEOUT_MS = 20000;   // per python candidate: wait for first sign of life
 const READY_TIMEOUT_MS = 120000;  // model load budget
@@ -41,7 +42,16 @@ class Engine extends EventEmitter {
   }
 
   scriptPath() {
+    if (app.isPackaged) {
+      // packaged: engine/ is bundled as an extraResource
+      return path.join(process.resourcesPath, 'engine', 'engine.py');
+    }
     return path.join(__dirname, '..', '..', 'engine', 'engine.py');
+  }
+
+  workDir() {
+    if (app.isPackaged) return process.resourcesPath;
+    return path.join(__dirname, '..', '..'); // worktree root
   }
 
   _setStatus(ready, model, error) {
@@ -90,7 +100,7 @@ class Engine extends EventEmitter {
       proc = spawn(cand.cmd, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        cwd: path.join(__dirname, '..', '..'), // worktree root
+        cwd: this.workDir(),
       });
     } catch (e) {
       log(`spawn failed for ${cand.cmd}: ${e.message}`);

@@ -43,6 +43,15 @@ function configPath() {
 function load() {
   const p = configPath();
   try {
+    if (!fs.existsSync(p) && app.isPackaged) {
+      // first packaged run: seed from the bundled default config
+      const seed = path.join(process.resourcesPath, 'config.json');
+      if (fs.existsSync(seed)) {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.copyFileSync(seed, p);
+        log(`seeded config from ${seed}`);
+      }
+    }
     if (fs.existsSync(p)) {
       const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
       config = { ...DEFAULTS, ...raw };
