@@ -10,3 +10,7 @@ TRAY_HOTKEY_ISSUES.md
 packaging/cache/
 packaging/stage/
 distributable/
+
+# Electron app build artifacts
+app/node_modules/
+app/package-lock.json
