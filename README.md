@@ -484,3 +484,52 @@ AI agents: see `CLAUDE.md` for detailed project conventions, architecture, and r
 - Temp audio files are deleted immediately after processing
 - Tailscale encrypts all phone-to-PC traffic
 - No cloud APIs
+
+---
+
+# Rework notes (branch `rework/spokenly-v2-engine`)
+
+The transcription pipeline is being rebuilt as a **Python stdio sidecar**
+(`engine/engine.py`) owned by a new Electron shell — no FastAPI, no HTTP, no
+port. The full Parakeet pipeline, pronunciation-fix, and regex-cleanup logic
+is ported verbatim from the legacy `server.py`. See `SPEC.md` for the design.
+
+## Engine
+
+`engine/engine.py` speaks newline-delimited JSON over stdio: protocol on
+stdout only, diagnostics on stderr. Request ops: `ping`, `transcribe`
+(`wav_path`), `set_fixes` (hot-reloads replacement words and persists them
+into the config file), `shutdown`.
+
+### Launch command (the command line that works)
+
+```
+python -u engine\engine.py --config config.json
+```
+
+- Use `python` (Python 3.14, `C:\Python314\python.exe`) — it is the install
+  that has `onnx_asr`, `onnxruntime-gpu` (CUDA), `word2number`, and `httpx`.
+  (`py -3.11` does **not** have the deps.)
+- The `-u` flag keeps stdout unbuffered. The engine also flushes every
+  response line explicitly, but spawn with `-u` anyway for safety.
+- The model is preloaded before the engine reads stdin; the first `ping`
+  after startup answers `ready: true`.
+
+### Verification helpers
+
+```
+python engine\engine_tests.py    # 115 deterministic pipeline tests
+python engine\smoke_client.py    # spawns engine like the Electron shell will: ping → transcribe → set_fixes → shutdown
+```
+
+## Notes for the Electron shell
+
+- Spawn exactly like `engine/smoke_client.py` does:
+  `[python, "-u", <path to engine.py>, "--config", <abs config path>]` with
+  piped stdio.
+- stdout is protocol only — never parse it for logs; read stderr for logs.
+- Every response is flushed immediately; read line-by-line (partial lines
+  are safe).
+- If the model fails to load, the engine still runs and reports
+  `ready: false` + `error` on `ping`; `transcribe` returns `ok: false`.
+- stdin EOF or a `shutdown` op ends the engine with exit code 0.
