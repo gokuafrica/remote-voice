@@ -72,7 +72,6 @@ async function onReady() {
   config.load();
   history.setConfigRef(config.get());
   Menu.setApplicationMenu(null);
-  history.pruneFile(); // rolling 24h retention: drop old entries at startup
 
   // allow mic capture from renderer pages
   try {
@@ -129,6 +128,8 @@ async function onReady() {
 
   // settings IPC
   ipcMain.handle('settings:get', () => config.get());
+  // deep copy so the renderer can never mutate the live DEFAULTS object
+  ipcMain.handle('settings:defaults', () => JSON.parse(JSON.stringify(config.DEFAULTS)));
   ipcMain.handle('engine:status:get', () => lastEngineStatus);
   ipcMain.handle('settings:save', async (e, cfg) => {
     config.set(cfg || {});

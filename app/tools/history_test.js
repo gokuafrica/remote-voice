@@ -1,6 +1,7 @@
 'use strict';
 
-// Node-only test for history retention pruning. Run: `node app/tools/history_test.js`
+// Node-only test for history capping (rotating last-N). Run:
+// `node app/tools/history_test.js`
 // (no Electron needed — history.js only touches the electron `app` path when
 // no data dir override is set, and the tests always set one).
 
@@ -10,9 +11,6 @@ const os = require('os');
 const path = require('path');
 
 const history = require('../main/history');
-
-const HOUR = 3600 * 1000;
-const DAY = 24 * HOUR;
 
 let passed = 0;
 function test(name, fn) {
@@ -40,6 +38,13 @@ function makeEntry(ts, text) {
   };
 }
 
+function seedFile(dir, entries) {
+  fs.writeFileSync(
+    path.join(dir, 'history.jsonl'),
+    entries.map((e) => JSON.stringify(e)).join('\n') + '\n'
+  );
+}
+
 function readLines(dir) {
   const p = path.join(dir, 'history.jsonl');
   return fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
@@ -60,133 +65,128 @@ function assertWellFormed(dir) {
   return lines.length;
 }
 
-// 1. default 24h retention: old entries dropped, recent + exactly-at-cutoff kept
-test('pruneFile drops entries older than 24h (default), keeps boundary', () => {
+// 1. pure cap: keeps the newest N, drops oldest first
+test('capEntries keeps last N entries and rotates oldest out', () => {
+  const entries = [1, 2, 3, 4, 5].map((i) => makeEntry(i, `entry ${i}`));
+  const capped = history.capEntries(entries, 3);
+  assert.deepStrictEqual(capped.map((e) => e.text), ['entry 3', 'entry 4', 'entry 5']);
+});
+
+// 2. cap below 1 is clamped to 1
+test('capEntries clamps cap to at least 1', () => {
+  const entries = [1, 2, 3].map((i) => makeEntry(i, `entry ${i}`));
+  const capped = history.capEntries(entries, 0);
+  assert.strictEqual(capped.length, 1);
+  assert.strictEqual(capped[0].text, 'entry 3');
+});
+
+// 3. 51st append evicts the oldest (default cap 50 from config)
+test('append at cap 50 evicts the oldest entry', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200, history_retention_hours: 24 });
+  history.setConfigRef({ history_max: 50 });
   const now = Date.now();
-  const old = makeEntry(now - 25 * HOUR, 'old entry');
-  const boundary = makeEntry(now - DAY, 'boundary entry'); // exactly 24h old -> kept
-  const recent = makeEntry(now - 1 * HOUR, 'recent entry');
-  fs.writeFileSync(
-    path.join(dir, 'history.jsonl'),
-    [old, boundary, recent].map((e) => JSON.stringify(e)).join('\n') + '\n'
-  );
-  const removed = history.pruneFile(now);
-  assert.strictEqual(removed, 1, 'exactly one old entry removed');
-  const count = assertWellFormed(dir);
-  assert.strictEqual(count, 2, 'recent + boundary survive');
-  const texts = readLines(dir).map((l) => JSON.parse(l).text);
-  assert(texts.includes('boundary entry'));
-  assert(texts.includes('recent entry'));
-  assert(!texts.includes('old entry'));
+  seedFile(dir, Array.from({ length: 50 }, (_, i) => makeEntry(now - (50 - i) * 1000, `entry ${i}`)));
+  history.append({ duration_ms: 1000, text: 'the 51st' });
+  assertWellFormed(dir);
+  const lines = readLines(dir);
+  assert.strictEqual(lines.length, 50, 'still exactly 50 entries');
+  const texts = lines.map((l) => JSON.parse(l).text);
+  assert(!texts.includes('entry 0'), 'oldest entry rotated out');
+  assert.strictEqual(texts[texts.length - 1], 'the 51st', 'newest entry is last on disk');
   assert(!fs.existsSync(path.join(dir, 'history.jsonl.tmp')), 'no leftover temp file');
 });
 
-// 2. retention window comes from config.history_retention_hours
-test('pruneFile honors configured retention hours (6h)', () => {
+// 4. append trims to a smaller configured cap
+test('append trims to configured cap (3)', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200, history_retention_hours: 6 });
-  const now = Date.now();
-  const old = makeEntry(now - 10 * HOUR, 'ten hours old');
-  const recent = makeEntry(now - 2 * HOUR, 'two hours old');
-  fs.writeFileSync(
-    path.join(dir, 'history.jsonl'),
-    [old, recent].map((e) => JSON.stringify(e)).join('\n') + '\n'
-  );
-  const removed = history.pruneFile(now);
-  assert.strictEqual(removed, 1);
+  history.setConfigRef({ history_max: 3 });
+  history.append({ duration_ms: 1000, text: 'first' });
+  history.append({ duration_ms: 1000, text: 'second' });
+  history.append({ duration_ms: 1000, text: 'third' });
+  history.append({ duration_ms: 1000, text: 'fourth' });
   assertWellFormed(dir);
-  assert.strictEqual(readLines(dir).length, 1);
-  assert(JSON.parse(readLines(dir)[0]).text === 'two hours old');
+  const texts = readLines(dir).map((l) => JSON.parse(l).text);
+  assert.deepStrictEqual(texts, ['second', 'third', 'fourth'], 'oldest rotated out first');
 });
 
-// 3. missing config key falls back to 24h
-test('prune falls back to 24h when history_retention_hours missing', () => {
+// 5. missing config falls back to the 50-entry default cap
+test('append falls back to default cap 50 without config', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200 });
-  const now = Date.now();
-  const kept = history.pruneEntries([makeEntry(now - 23 * HOUR, 'a'), makeEntry(now - 25 * HOUR, 'b')], now);
-  assert.strictEqual(kept.length, 1);
-  assert.strictEqual(kept[0].text, 'a');
+  history.setConfigRef({});
+  seedFile(dir, Array.from({ length: 50 }, (_, i) => makeEntry(i, `entry ${i}`)));
+  history.append({ duration_ms: 1000, text: 'newest' });
+  assertWellFormed(dir);
+  const lines = readLines(dir);
+  assert.strictEqual(lines.length, 50);
+  assert(!lines.map((l) => JSON.parse(l).text).includes('entry 0'), 'default cap rotated oldest out');
 });
 
-// 4. corrupt/partial lines are skipped, malformed ts kept, file stays clean
-test('pruneFile survives corrupt lines and keeps malformed-ts entries', () => {
+// 6. corrupt/partial lines are rewritten away on the next append,
+//    malformed-ts entries survive (time never prunes them)
+test('append survives corrupt lines and keeps malformed-ts entries', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200, history_retention_hours: 24 });
-  const now = Date.now();
-  const good = makeEntry(now - 1 * HOUR, 'good entry');
+  history.setConfigRef({ history_max: 50 });
   const malformed = { id: 'm1', duration_ms: 5, text: 'no ts here' };
   fs.writeFileSync(
     path.join(dir, 'history.jsonl'),
     [
       '{"id":"broken","ts":', // truncated line (simulated partial write)
-      JSON.stringify(good),
       JSON.stringify(malformed),
     ].join('\n') + '\n'
   );
-  const removed = history.pruneFile(now);
-  assert.strictEqual(removed, 1, 'the corrupt line is rewritten away');
+  history.append({ duration_ms: 1000, text: 'fresh' });
   const count = assertWellFormed(dir);
-  assert.strictEqual(count, 2, 'good + malformed-ts entries kept');
+  assert.strictEqual(count, 2, 'corrupt line rewritten away, rest kept');
+  const texts = readLines(dir).map((l) => JSON.parse(l).text);
+  assert(texts.includes('no ts here'), 'malformed-ts entry kept — no time-based pruning');
+  assert(texts.includes('fresh'));
 });
 
-// 5. append enforces the time window AND the history_max cap (oldest first)
-test('append prunes old entries and trims to history_max', () => {
+// 7. old entries are never dropped: only count is bounded
+test('list keeps entries older than any time window', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 2, history_retention_hours: 24 });
+  history.setConfigRef({ history_max: 50 });
   const now = Date.now();
-  const old = makeEntry(now - 25 * HOUR, 'stale');
-  fs.writeFileSync(path.join(dir, 'history.jsonl'), JSON.stringify(old) + '\n');
-  history.append({ duration_ms: 1000, text: 'first' });
-  history.append({ duration_ms: 1000, text: 'second' });
-  assertWellFormed(dir);
-  const entries = readLines(dir).map((l) => JSON.parse(l));
-  assert.strictEqual(entries.length, 2, 'capped at history_max=2');
-  const texts = entries.map((e) => e.text);
-  assert(!texts.includes('stale'), 'stale entry pruned by time window');
-  assert.deepStrictEqual(texts, ['first', 'second'], 'oldest trimmed first');
-});
-
-// 6. list() prunes persistently, then returns newest first
-test('list prunes old entries and returns newest first', () => {
-  const dir = tmpDir();
-  history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200, history_retention_hours: 24 });
-  const now = Date.now();
-  const old = makeEntry(now - 30 * HOUR, 'ancient');
-  const mid = makeEntry(now - 2 * HOUR, 'mid');
-  const recent = makeEntry(now - 30 * 1000, 'fresh');
-  fs.writeFileSync(
-    path.join(dir, 'history.jsonl'),
-    [old, mid, recent].map((e) => JSON.stringify(e)).join('\n') + '\n'
-  );
+  seedFile(dir, [
+    makeEntry(now - 30 * 24 * 3600 * 1000, 'a month old'),
+    makeEntry(now - 30 * 1000, 'fresh'),
+  ]);
   const listed = history.list();
-  assert.strictEqual(listed.length, 2);
-  assert.strictEqual(listed[0].text, 'fresh');
-  assert.strictEqual(listed[1].text, 'mid');
-  assert.strictEqual(readLines(dir).length, 2, 'prune persisted to file');
-  // empty file after everything ages out
-  history.setConfigRef({ history_max: 200, history_retention_hours: 24 });
-  const gone = history.pruneFile(Date.now() + 3 * DAY);
-  assert.strictEqual(gone, 2);
-  assert.strictEqual(readLines(dir).length, 0);
-  assertWellFormed(dir);
+  assert.strictEqual(listed.length, 2, 'no time-based retention');
+  assert.strictEqual(listed[0].text, 'fresh', 'newest first');
+  assert.strictEqual(listed[1].text, 'a month old');
 });
 
-// 7. prune on an empty/missing file is a no-op
-test('pruneFile on missing file is a no-op', () => {
+// 8. list persists a trim when the configured cap shrank below file size
+test('list trims file when config cap shrank', () => {
   const dir = tmpDir();
   history.setDataDir(dir);
-  history.setConfigRef({ history_max: 200, history_retention_hours: 24 });
-  assert.strictEqual(history.pruneFile(), 0);
-  assert(!fs.existsSync(path.join(dir, 'history.jsonl.tmp')));
+  history.setConfigRef({ history_max: 10 });
+  seedFile(dir, Array.from({ length: 50 }, (_, i) => makeEntry(i, `entry ${i}`)));
+  const listed = history.list();
+  assert.strictEqual(listed.length, 10);
+  assert.strictEqual(readLines(dir).length, 10, 'trim persisted');
+  assert.strictEqual(JSON.parse(readLines(dir)[0]).text, 'entry 40', 'newest 10 kept');
+});
+
+// 9. remove() still works and keeps the cap
+test('remove deletes an entry by id', () => {
+  const dir = tmpDir();
+  history.setDataDir(dir);
+  history.setConfigRef({ history_max: 50 });
+  const a = makeEntry(1, 'alpha');
+  const b = makeEntry(2, 'beta');
+  seedFile(dir, [a, b]);
+  assert.strictEqual(history.remove(a.id), true);
+  assert.strictEqual(history.remove('missing'), false);
+  const texts = readLines(dir).map((l) => JSON.parse(l).text);
+  assert.deepStrictEqual(texts, ['beta']);
+  assertWellFormed(dir);
 });
 
 console.log(`\n${passed} tests passed`);

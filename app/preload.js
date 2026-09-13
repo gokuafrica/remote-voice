@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('remotevoice', {
   settingsSave(config) {
     return ipcRenderer.invoke('settings:save', config);
   },
+  settingsDefaults() {
+    return ipcRenderer.invoke('settings:defaults');
+  },
   listMics() {
     return ipcRenderer.invoke('mics:list');
   },
