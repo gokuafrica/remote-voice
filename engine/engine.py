@@ -91,6 +91,7 @@ def save_config() -> None:
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
     os.replace(tmp, CONFIG_PATH)
 
 
