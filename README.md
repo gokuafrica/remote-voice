@@ -257,7 +257,7 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 | **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app. Supports remote servers over Tailscale |
 | **Mac Client** | `mac_tray.py` | macOS menu bar client — same as tray app but for Mac, connects to Windows server over Tailscale |
 | **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 127 tests covering regex pipeline + LLM deep format path |
+| **Tests** | `tests.py` | 138 tests covering configuration, regex pipeline, and LLM deep format path |
 
 ## Setup
 
@@ -269,6 +269,18 @@ These quirks are inherent to using a 7B parameter model for semantic tasks. For 
 - [Tailscale](https://tailscale.com) (for phone access from anywhere)
 
 ### Install
+
+For the bundled Windows build, run `RemoteVoiceSetup.exe`. The installer adds
+the port 8787 firewall rule and creates the `RemoteVoiceServer` logon task.
+It also installs Microsoft's Visual C++ x64 runtime required by ONNX Runtime.
+Application files are installed in Program Files; your editable `config.json`
+and `tray_config.json` are kept in `%LOCALAPPDATA%\Remote Voice`, so settings
+work for standard Windows accounts and survive uninstall/reinstall.
+The server prefers an NVIDIA GPU but falls back to CPU if CUDA cannot initialize
+(CPU transcription is slower). The speech model downloads on first launch, so
+the PC needs an Internet connection once even though Python dependencies are bundled.
+
+To run from source instead, install the dependencies below:
 
 ```bash
 pip install -r requirements.txt
@@ -450,7 +462,7 @@ python tests.py --llm-only   # LLM tests only
 python mac_tray_tests.py     # Mac tray diagnostic helper tests
 ```
 
-**Part 1 — Regex tests (111 tests):** Exact-match tests for all deterministic cleanup. These cover filler removal, number conversion, all 17 spoken punctuation symbols, period removal before manual punctuation, duplicate comma collapse, Parakeet comma/hyphen variations, new line/paragraph (including period preservation), scratch that (including line/paragraph boundary respect), start over, numbered lists (including false positive rejection), deep format trigger detection (with and without custom instructions), pronunciation fixes (substitution and full pipeline), and edge cases. These tests require no external dependencies and always produce the same result.
+**Part 1 — Deterministic tests (124 tests):** Exact-match cleanup tests plus configuration-path, headless-start, and GPU/CPU provider-selection checks. These cover filler removal, number conversion, spoken punctuation, editing commands, model fallback, and packaged configuration behavior. They do not need Ollama.
 
 **Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep format path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
 

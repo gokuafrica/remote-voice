@@ -54,6 +54,7 @@ $pythonZip = Join-Path $cacheDir $pythonZipName
 $getPip    = Join-Path $cacheDir 'get-pip.py'
 $ffmpegZip = Join-Path $cacheDir 'ffmpeg-release-essentials.zip'
 $ffmpegExe = Join-Path $cacheDir 'ffmpeg.exe'
+$vcRedist  = Join-Path $cacheDir 'vc_redist.x64.exe'
 
 function Get-Download([string]$Url, [string]$Dest, [string]$Label) {
     if (Test-Path -LiteralPath $Dest) {
@@ -75,6 +76,12 @@ function Get-Download([string]$Url, [string]$Dest, [string]$Label) {
 Get-Download "https://www.python.org/ftp/python/$PythonVersion/$pythonZipName" $pythonZip "Python $PythonVersion embeddable"
 Get-Download "https://bootstrap.pypa.io/get-pip.py" $getPip "get-pip.py"
 Get-Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" $ffmpegZip "ffmpeg essentials build"
+Get-Download "https://aka.ms/vc14/vc_redist.x64.exe" $vcRedist "Microsoft Visual C++ x64 runtime"
+$vcSignature = Get-AuthenticodeSignature -LiteralPath $vcRedist
+if ($vcSignature.Status -ne 'Valid' -or
+    $vcSignature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation') {
+    throw "Visual C++ redistributable signature is not valid and Microsoft-signed: $vcRedist"
+}
 
 # Validate ffmpeg zip contains bin/ffmpeg.exe and extract just that binary.
 if (-not (Test-Path -LiteralPath $ffmpegExe)) {
@@ -119,6 +126,11 @@ if ($pth -notmatch '(?m)^Lib\\site-packages\s*$') {
 if ($pth -notmatch '(?m)^DLLs\s*$') {
     $pth = $pth -replace '(?m)^(Lib\s*)$', "`$1DLLs`r`n"
     if ($pth -notmatch '(?m)^DLLs\s*$') { $pth = $pth.TrimEnd() + "`r`nDLLs`r`n" }
+}
+if ($pth -notmatch '(?m)^\.\.\s*$') {
+    # Isolated embedded Python does not automatically add the script directory
+    # to sys.path. The app's imports live one level above python311.
+    $pth = $pth.TrimEnd() + "`r`n..`r`n"
 }
 Set-Content -LiteralPath $pthPath -Value $pth -NoNewline
 Write-Host "  python311._pth patched:"
@@ -223,6 +235,7 @@ if (-not $tkCopied) {
 Write-Step 4 "Copy source files, default configs, ffmpeg"
 
 $sourceFiles = @(
+    'app_paths.py',
     'server.py',
     'gui.py',
     'tray.py',
@@ -240,16 +253,20 @@ foreach ($f in $sourceFiles) {
 # Deliberately NOT copied: config.json, tray_config.json (personal), mac_* files,
 # tests*.py, requirements*.txt, README.md, CLAUDE.md, __pycache__, .git.
 
+$stageDefaults = Join-Path $stageDir 'defaults'
+New-Item -ItemType Directory -Force -Path $stageDefaults | Out-Null
 foreach ($cfg in @('config.json', 'tray_config.json')) {
     $src = Join-Path $defaultsDir $cfg
     if (-not (Test-Path -LiteralPath $src)) { throw "Missing default config: $src" }
-    Copy-Item -LiteralPath $src -Destination $stageDir -Force
+    Copy-Item -LiteralPath $src -Destination $stageDefaults -Force
     Write-Host "  copied default: $cfg"
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $stageDir 'ffmpeg') | Out-Null
 Copy-Item -LiteralPath $ffmpegExe -Destination (Join-Path $stageDir 'ffmpeg\ffmpeg.exe') -Force
 Write-Host "  copied: ffmpeg\ffmpeg.exe"
+Copy-Item -LiteralPath $vcRedist -Destination (Join-Path $stageDir 'vc_redist.x64.exe') -Force
+Write-Host "  copied: vc_redist.x64.exe"
 
 # ---------------------------------------------------------------------------
 # Step 5: Verify staged python imports
@@ -257,6 +274,8 @@ Write-Host "  copied: ffmpeg\ffmpeg.exe"
 Write-Step 5 "Verify staged python imports"
 & (Join-Path $stagePython 'python.exe') -c "import onnxruntime, tkinter, pystray, keyboard, sounddevice, PIL, pynput, fastapi; print('imports OK', onnxruntime.get_available_providers())" 2>&1 | ForEach-Object { Write-Host "    | $_" }
 if ($LASTEXITCODE -ne 0) { throw "Staged python import verification FAILED (exit $LASTEXITCODE)." }
+& (Join-Path $stagePython 'python.exe') -c "import app_paths; print('app imports OK', app_paths.APP_DIR)" 2>&1 | ForEach-Object { Write-Host "    | $_" }
+if ($LASTEXITCODE -ne 0) { throw "Staged app import verification FAILED (exit $LASTEXITCODE)." }
 
 # ---------------------------------------------------------------------------
 # Step 6: Locate Inno Setup compiler (ISCC.exe), install via winget if needed

@@ -12,10 +12,13 @@ LLM only:       python tests.py --llm-only
 """
 import asyncio
 import importlib.util
+import tempfile
 import sys
 import types
 from pathlib import Path
 from unittest import mock
+
+from app_paths import config_path
 
 sys.path.insert(0, '.')
 from server import (
@@ -322,13 +325,135 @@ run_regex = "--llm-only" not in sys.argv
 run_llm = "--regex-only" not in sys.argv
 
 
+def test_config_paths():
+    global passed, failed, section_passed, section_failed
+    cases = []
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+
+        checkout = root / "checkout"
+        checkout.mkdir()
+        cases.append((
+            config_path("config.json", app_dir=checkout, environ={"LOCALAPPDATA": str(root / "data")})
+            == checkout / "config.json",
+            "Source checkout keeps config beside scripts",
+        ))
+
+        packaged = root / "installed"
+        defaults = packaged / "defaults"
+        defaults.mkdir(parents=True)
+        (defaults / "config.json").write_text('{"server_port": 8787}', encoding="utf-8")
+        local = root / "local"
+        seeded = config_path("config.json", app_dir=packaged, environ={"LOCALAPPDATA": str(local)})
+        cases.append((
+            seeded == local / "Remote Voice" / "config.json"
+            and seeded.read_text(encoding="utf-8") == '{"server_port": 8787}',
+            "Packaged install seeds per-user config",
+        ))
+
+        seeded.write_text('{"server_port": 9999}', encoding="utf-8")
+        config_path("config.json", app_dir=packaged, environ={"LOCALAPPDATA": str(local)})
+        cases.append((
+            seeded.read_text(encoding="utf-8") == '{"server_port": 9999}',
+            "Existing per-user config is preserved",
+        ))
+
+        migrating = root / "migrating"
+        (migrating / "defaults").mkdir(parents=True)
+        (migrating / "defaults" / "config.json").write_text("default", encoding="utf-8")
+        (migrating / "config.json").write_text("legacy", encoding="utf-8")
+        migrated = config_path(
+            "config.json",
+            app_dir=migrating,
+            environ={"LOCALAPPDATA": str(root / "migrated-data")},
+        )
+        cases.append((
+            migrated.read_text(encoding="utf-8") == "legacy",
+            "Earlier installer config is migrated before defaults",
+        ))
+
+    for ok, label in cases:
+        if ok:
+            passed += 1
+            section_passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            section_failed += 1
+            print(f"  FAIL: {label}")
+
+
+def test_voice_model_providers():
+    global passed, failed, section_passed, section_failed
+    sentinel = object()
+    with mock.patch.object(server.onnx_asr, "load_model", return_value=sentinel) as loader:
+        result = server.load_voice_model()
+        ok = result is sentinel and loader.call_args.kwargs["providers"] == [
+            "CUDAExecutionProvider", "CPUExecutionProvider"
+        ]
+        label = "GPU load excludes unbundled TensorRT"
+        if ok:
+            passed += 1
+            section_passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            section_failed += 1
+            print(f"  FAIL: {label}")
+
+    with mock.patch.object(server.onnx_asr, "load_model", side_effect=[RuntimeError("GPU unavailable"), sentinel]) as loader:
+        result = server.load_voice_model()
+        ok = result is sentinel and loader.call_args_list[1].kwargs["providers"] == ["CPUExecutionProvider"]
+        label = "GPU initialization failure falls back to CPU"
+        if ok:
+            passed += 1
+            section_passed += 1
+            print(f"  PASS: {label}")
+        else:
+            failed += 1
+            section_failed += 1
+            print(f"  FAIL: {label}")
+
+
+def test_headless_standard_streams():
+    global passed, failed, section_passed, section_failed
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    created = []
+    try:
+        sys.stdout = None
+        sys.stderr = None
+        server._ensure_standard_streams()
+        created = [sys.stdout, sys.stderr]
+        ok = all(stream is not None and not stream.closed for stream in created)
+    finally:
+        sys.stdout, sys.stderr = original_stdout, original_stderr
+        for stream in created:
+            stream.close()
+
+    label = "Task Scheduler launch supplies missing pythonw streams"
+    if ok:
+        passed += 1
+        section_passed += 1
+        print(f"  PASS: {label}")
+    else:
+        failed += 1
+        section_failed += 1
+        print(f"  FAIL: {label}")
+
 # =======================================================================
-# PART 1: REGEX TESTS (deterministic)
+# PART 1: DETERMINISTIC TESTS
 # =======================================================================
 if run_regex:
     print("\n" + "=" * 60)
     print("PART 1: REGEX PIPELINE TESTS")
     print("=" * 60 + "\n")
+
+    section("Configuration Paths")
+    test_config_paths()
+
+    section("Voice Model Providers")
+    test_voice_model_providers()
+    test_headless_standard_streams()
 
     # -------------------------------------------------------------------
     section("Filler Removal")

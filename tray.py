@@ -31,13 +31,15 @@ import sounddevice as sd
 from PIL import Image, ImageDraw
 from pynput.keyboard import Controller as KBController
 
+from app_paths import config_path
+
 try:
     import pythoncom
 except ImportError:
     pythoncom = None
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-TRAY_CONFIG_PATH = Path(__file__).parent / "tray_config.json"
+CONFIG_PATH = config_path("config.json")
+TRAY_CONFIG_PATH = config_path("tray_config.json")
 
 TRAY_DEFAULTS = {
     "server_url": None,       # e.g. "http://100.x.y.z:8787" — null = localhost from config.json

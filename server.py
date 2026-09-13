@@ -17,6 +17,22 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# pythonw.exe has no console streams when Task Scheduler launches it.  Uvicorn's
+# logging setup expects file-like stderr/stdout objects and otherwise exits
+# before the server starts.
+_stdio_sinks = []
+
+
+def _ensure_standard_streams():
+    for stream_name in ("stdout", "stderr"):
+        if getattr(sys, stream_name) is None:
+            sink = open(os.devnull, "w", encoding="utf-8")
+            setattr(sys, stream_name, sink)
+            _stdio_sinks.append(sink)
+
+
+_ensure_standard_streams()
+
 # Add CUDA DLL directories to PATH before importing onnxruntime.
 # Wheels may live in <sys.prefix>\Lib\site-packages (venv/embedded Python)
 # or in %APPDATA%\Roaming\Python\Python3XX\site-packages (pip install --user).
@@ -44,10 +60,12 @@ from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from word2number import w2n
 
+from app_paths import config_path
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-CONFIG_PATH = Path(__file__).parent / "config.json"
+CONFIG_PATH = config_path("config.json")
 
 
 def load_config() -> dict:
@@ -116,11 +134,30 @@ logging.getLogger("uvicorn.access").addFilter(_HideKeepalive())
 model = None
 
 
+def load_voice_model():
+    """Prefer CUDA, but keep the server usable without a compatible GPU.
+
+    The GPU wheel also advertises TensorRT even when TensorRT is not installed,
+    so do not let onnx-asr select providers from the wheel's advertised list.
+    """
+    try:
+        return onnx_asr.load_model(
+            VOICE_MODEL,
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+    except Exception as exc:
+        log.warning("GPU model load failed; retrying on CPU: %s", exc)
+        return onnx_asr.load_model(
+            VOICE_MODEL,
+            providers=["CPUExecutionProvider"],
+        )
+
+
 @asynccontextmanager
 async def lifespan(app):
     global model
     log.info(f"Loading voice model: {VOICE_MODEL}")
-    model = onnx_asr.load_model(VOICE_MODEL)
+    model = load_voice_model()
     log.info(f"Voice model loaded. LLM model (from config): {OLLAMA_MODEL}")
     log.info("Server ready.")
     yield
@@ -174,7 +211,7 @@ def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
         except Exception as e:
             if "CUDA failure 999" in str(e) or "ONNXRuntimeError" in str(e):
                 log.warning(f"CUDA context lost ({e.__class__.__name__}) — reloading model and retrying...")
-                model = onnx_asr.load_model(VOICE_MODEL)
+                model = load_voice_model()
                 log.info("Model reloaded successfully.")
                 return str(model.recognize(recognize_path))
             raise

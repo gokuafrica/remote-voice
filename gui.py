@@ -15,7 +15,10 @@ from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+from app_paths import config_path
+
+
+CONFIG_PATH = config_path("config.json")
 SERVER_SCRIPT = Path(__file__).parent / "server.py"
 
 VOICE_MODELS = [
@@ -238,17 +241,26 @@ class RemoteVoiceGUI:
             messagebox.showerror("Server Already Running", f"Port {port} is already in use.\n\nAnother server instance (or start.bat) may be running. Stop it first.")
             return
 
-        self.save_config()
+        try:
+            self.save_config()
+        except Exception as e:
+            messagebox.showerror("Cannot Save Settings", f"Failed to save config.json:\n{e}")
+            return
+
         self.append_log("Starting server...\n")
 
-        self.server_process = subprocess.Popen(
-            [sys.executable, str(SERVER_SCRIPT)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            cwd=str(SERVER_SCRIPT.parent),
-        )
+        try:
+            self.server_process = subprocess.Popen(
+                [sys.executable, str(SERVER_SCRIPT)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(SERVER_SCRIPT.parent),
+            )
+        except Exception as e:
+            messagebox.showerror("Failed to Start Server", f"Could not launch the server process:\n{e}")
+            return
 
         self.start_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
