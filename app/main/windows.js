@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { BrowserWindow, screen, ipcMain } = require('electron');
 
-const OVERLAY_SIZE = { width: 180, height: 56 };
+// Matches the overlay CSS design (renderer README: ~240x60). Keep in sync
+// with app/renderer/overlay.css.
+const OVERLAY_SIZE = { width: 240, height: 60 };
 const SETTINGS_SIZE = { width: 940, height: 680 };
 
 function log(msg) {
@@ -48,6 +50,10 @@ function createOverlay() {
     show: false,
     frame: false,
     transparent: true,
+    // Windows defaults draw a square DWM shadow/frame around the window rect,
+    // which shows as a square halo around the rounded pill. Both must be off.
+    hasShadow: false,
+    thickFrame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,

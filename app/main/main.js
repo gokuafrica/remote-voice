@@ -1,8 +1,15 @@
 'use strict';
 
-const { app, ipcMain, session, Menu } = require('electron');
+const { app, ipcMain, session, Menu, screen } = require('electron');
 
 app.setName('Remote Voice');
+
+if (process.env.RV_TEST_CMD) {
+  // TEST-ONLY: isolated userData so a concurrently running dev instance's
+  // single-instance lock cannot block pixel-capture verification runs.
+  const tpath = require('path');
+  app.setPath('userData', tpath.join(app.getPath('appData'), 'Remote Voice Test'));
+}
 
 const config = require('./config');
 const state = require('./state');
@@ -145,6 +152,29 @@ async function onReady() {
   ipcMain.handle('mics:list', async () => recorder.listMics());
   ipcMain.handle('history:list', (e, query) => history.list(query));
   ipcMain.handle('history:delete', (e, id) => history.remove(id));
+
+  if (process.env.RV_TEST_CMD) {
+    const tfs = require('fs');
+    const cmdFile = process.env.RV_TEST_CMD;
+    const boundsFile = process.env.RV_TEST_BOUNDS || `${cmdFile}.bounds`;
+    let lastCmd = '';
+    setInterval(() => {
+      const w = windows.windows.overlay;
+      if (w && !w.isDestroyed() && w.isVisible()) {
+        const dpr = screen.getPrimaryDisplay().scaleFactor;
+        try { tfs.writeFileSync(boundsFile, JSON.stringify({ ...w.getBounds(), dpr })); } catch (_) {}
+      }
+      let cmd = null;
+      try { cmd = tfs.readFileSync(cmdFile, 'utf8').trim(); } catch (_) {}
+      if (cmd && cmd !== lastCmd) {
+        lastCmd = cmd;
+        if (cmd === 'recording') { windows.showOverlay(); windows.sendOverlayState('recording', 0.6); }
+        else if (cmd === 'processing') { windows.showOverlay(); windows.sendOverlayState('processing', 0); }
+        else if (cmd === 'page-hidden') { windows.showOverlay(); setTimeout(() => { const o = windows.windows.overlay; if (o && !o.isDestroyed()) o.webContents.send('overlay:state', { state: 'hidden', level: 0 }); }, 500); }
+        else if (cmd === 'hidden') windows.hideOverlay();
+      }
+    }, 200);
+  }
 
   if (SMOKE) {
     runSmoke();
