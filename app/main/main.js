@@ -17,6 +17,13 @@ const history = require('./history');
 const SMOKE = process.argv.includes('--smoke');
 const SMOKE_TIMEOUT_MS = 30000;
 
+// Smoke runs headless CI-style: isolate its userData so a dev instance the
+// user (or another build) is running can never block the single-instance lock.
+if (SMOKE) {
+  const path = require('path');
+  app.setPath('userData', path.join(app.getPath('appData'), 'Remote Voice Smoke'));
+}
+
 function log(msg) {
   console.log(`[main] ${msg}`);
 }

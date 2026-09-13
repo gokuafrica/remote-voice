@@ -1,44 +1,24 @@
 'use strict';
 
 const { Tray, Menu, nativeImage } = require('electron');
+const iconDraw = require('./trayIconDraw');
 
-const SIZE = 64;
-const COLORS = {
-  idle: [0x88, 0x88, 0x88, 0xff],
-  recording: [0xff, 0x44, 0x44, 0xff],
-  processing: [0x44, 0x88, 0xff, 0xff],
-  success: [0x44, 0xcc, 0x44, 0xff],
-};
+const TRAY_SIZE = 32; // downscaled in-app from the 256px master for crisp AA
 
 function log(msg) {
   console.log(`[tray] ${msg}`);
 }
 
-// Procedurally drawn mic icon (port of old tray.py icon): colored circle +
-// white mic body, stem and base, rendered into a raw BGRA bitmap.
+// Studio-mic glyph on a state-colored circle: drawn at 256x256 with SDF
+// antialiasing (app/main/trayIconDraw.js), area-downsampled to 32 and handed
+// to Windows as a premultiplied BGRA bitmap.
 function drawIcon(colorName) {
-  const color = COLORS[colorName] || COLORS.idle;
-  const buf = Buffer.alloc(SIZE * SIZE * 4);
-  const put = (x, y, r, g, b, a) => {
-    const i = (y * SIZE + x) * 4;
-    buf[i] = b; buf[i + 1] = g; buf[i + 2] = r; buf[i + 3] = a;
-  };
-  for (let y = 0; y < SIZE; y++) {
-    for (let x = 0; x < SIZE; x++) {
-      const dx = x - 32;
-      const dy = y - 32;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= 24) put(x, y, color[0], color[1], color[2], color[3]);
-      else if (dist <= 25) put(x, y, color[0], color[1], color[2], 128); // AA edge
-      // mic body (white rounded rect)
-      else if (x >= 26 && x < 38 && y >= 14 && y < 38) put(x, y, 255, 255, 255, 255);
-      // stem
-      else if (x >= 31 && x < 33 && y >= 38 && y < 50) put(x, y, 255, 255, 255, 255);
-      // base arc approximation: horizontal bar
-      else if (y >= 50 && y < 52 && x >= 24 && x < 40) put(x, y, 255, 255, 255, 255);
-    }
-  }
-  return nativeImage.createFromBitmap(buf, { width: SIZE, height: SIZE });
+  const master = iconDraw.renderIcon(colorName);
+  const small = iconDraw.downsample(master.data, master.size, TRAY_SIZE);
+  return nativeImage.createFromBitmap(Buffer.from(iconDraw.rgbaToBgraPremultiplied(small)), {
+    width: TRAY_SIZE,
+    height: TRAY_SIZE,
+  });
 }
 
 const STATE_TO_ICON = {
