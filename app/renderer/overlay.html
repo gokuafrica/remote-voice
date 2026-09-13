@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Spokenly overlay</title>
+  <link rel="stylesheet" href="overlay.css" />
+</head>
+<body>
+  <div id="pill" class="pill hidden" role="status" aria-live="off">
+    <span id="mic" class="mic-dot" aria-hidden="true"></span>
+    <span id="bars" class="bars" aria-hidden="true"></span>
+    <span id="spinner" class="spinner" aria-hidden="true"></span>
+    <span id="pill-label" class="pill-label">Listening&hellip;</span>
+  </div>
+  <script src="overlay.js"></script>
+</body>
+</html>
