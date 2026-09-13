@@ -11,7 +11,7 @@ const DEFAULTS = {
   sample_rate: 16000,
   voice_model: 'nemo-parakeet-tdt-0.6b-v2',
   pronunciation_fixes: {},
-  overlay_position: 'cursor',
+  overlay_position: 'bottom',
   history_max: 200,
   ollama_url: 'http://localhost:11434',
   ollama_model: 'qwen2.5:3b',

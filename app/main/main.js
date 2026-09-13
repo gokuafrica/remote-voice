@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, ipcMain, session } = require('electron');
+const { app, ipcMain, session, Menu } = require('electron');
 
 app.setName('Remote Voice');
 
@@ -71,6 +71,7 @@ async function onReady() {
   migrateLegacyData();
   config.load();
   history.setConfigRef(config.get());
+  Menu.setApplicationMenu(null);
 
   // allow mic capture from renderer pages
   try {
