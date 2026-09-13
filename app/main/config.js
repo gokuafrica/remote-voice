@@ -13,6 +13,7 @@ const DEFAULTS = {
   pronunciation_fixes: {},
   overlay_position: 'bottom',
   history_max: 200,
+  history_retention_hours: 24,
   ollama_url: 'http://localhost:11434',
   ollama_model: 'qwen2.5:3b',
   cleanup_prompt: '',

@@ -72,6 +72,7 @@ async function onReady() {
   config.load();
   history.setConfigRef(config.get());
   Menu.setApplicationMenu(null);
+  history.pruneFile(); // rolling 24h retention: drop old entries at startup
 
   // allow mic capture from renderer pages
   try {
@@ -90,8 +91,12 @@ async function onReady() {
     onCancel: (reason) => cancelRecording(reason),
   });
 
-  // engine status -> settings window + smoke
+  // engine status -> settings window + smoke. Also cache the latest status
+  // so a renderer that loads after a transition can pull it (engine:status:get)
+  // instead of staying stuck on its static "Loading" placeholder.
+  let lastEngineStatus = null;
   engine.on('status', ({ ready, model, error }) => {
+    lastEngineStatus = { ready, model, error };
     windows.broadcast('engine:status', { ready, model, error });
   });
   engine.start(config);
@@ -124,6 +129,7 @@ async function onReady() {
 
   // settings IPC
   ipcMain.handle('settings:get', () => config.get());
+  ipcMain.handle('engine:status:get', () => lastEngineStatus);
   ipcMain.handle('settings:save', async (e, cfg) => {
     config.set(cfg || {});
     try {

@@ -92,7 +92,8 @@
 
   // ---------------------------------------------------------------- engine
 
-  api.onEngineStatus(({ ready, model, error }) => {
+  function renderEngineStatus(payload) {
+    const { ready, model, error } = payload || {};
     const ind = $('engine-indicator');
     const status = $('engine-status');
     if (ready) {
@@ -111,7 +112,9 @@
       $('engine-model').textContent = 'Loading model…';
       status.textContent = 'Engine: loading model…';
     }
-  });
+  }
+
+  api.onEngineStatus(renderEngineStatus);
 
   // ---------------------------------------------------------------- hotkey
 
@@ -463,7 +466,19 @@
     $('ollama-url').value = config.ollama_url || '';
     $('ollama-model').value = config.ollama_model || '';
     $('sample-rate').textContent = `${config.sample_rate || 16000} Hz`;
+    const hours = Number(config.history_retention_hours);
+    const shownHours = Number.isFinite(hours) && hours > 0 ? Math.round(hours) : 24;
+    $('history-retention-hint').textContent = `History is kept for ${shownHours} hours.`;
     renderFixes(config.pronunciation_fixes);
+    // pull the current engine status so a window opened after the engine
+    // became ready shows the true state instead of the static placeholder
+    if (typeof api.engineStatusGet === 'function') {
+      try {
+        renderEngineStatus(await api.engineStatusGet());
+      } catch (err) {
+        console.error('[settings] engineStatusGet failed', err);
+      }
+    }
     await refreshMics();
     refreshHistory();
   }
