@@ -126,6 +126,32 @@ Set-Content -LiteralPath $pthPath -Value $pth -NoNewline
 Write-Host "  python311._pth:"
 Get-Content -LiteralPath $pthPath | ForEach-Object { Write-Host "    | $_" }
 
+# The embedded Python runtime includes vcruntime140.dll, but clean Windows
+# images do not necessarily have the rest of the release MSVC runtime that
+# onnxruntime's native extension links against. Bundle the release DLLs next
+# to python.exe so per-user installs do not require an elevated VC++ installer.
+$systemRuntimeDir = Join-Path $env:windir 'System32'
+$runtimeDllNames = @(
+    'concrt140.dll',
+    'msvcp140.dll',
+    'msvcp140_1.dll',
+    'msvcp140_2.dll',
+    'msvcp140_atomic_wait.dll',
+    'msvcp140_codecvt_ids.dll',
+    'vcruntime140.dll',
+    'vcruntime140_1.dll',
+    'vcruntime140_threads.dll'
+)
+foreach ($runtimeDllName in $runtimeDllNames) {
+    $runtimeSource = Join-Path $systemRuntimeDir $runtimeDllName
+    $runtimeDestination = Join-Path $stagePython $runtimeDllName
+    if (-not (Test-Path -LiteralPath $runtimeSource)) {
+        throw "Required release VC++ runtime DLL is missing: $runtimeSource"
+    }
+    Copy-Item -LiteralPath $runtimeSource -Destination $runtimeDestination -Force
+}
+Write-Host "  bundled release VC++ runtime DLLs beside python.exe"
+
 # ---------------------------------------------------------------------------
 # Step 3: pip install engine deps + nvidia cu12 wheels (background, polled)
 # ---------------------------------------------------------------------------
@@ -245,17 +271,21 @@ if (($gateOut -join "`n") -notmatch 'CUDAExecutionProvider') {
 # Step 6: Package the Electron app into stage\_pkg (dist\ untouched)
 # ---------------------------------------------------------------------------
 Write-Step 6 "Package Electron app into stage\_pkg"
-if (Test-Path -LiteralPath (Join-Path $stagePkg 'Remote Voice-win32-x64\Remote Voice.exe')) {
-    Write-Host "  [cached] packaged app already present"
-} else {
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'app\node_modules\electron'))) {
-        Write-Host "  npm install in app\..."
-        & npm.cmd install --prefix (Join-Path $repoRoot 'app') 2>&1 | Select-Object -Last 3 | ForEach-Object { Write-Host "    | $_" }
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
-    }
-    & node.exe (Join-Path $packagingDir 'package_app.js') $stagePkg 2>&1 | ForEach-Object { Write-Host "    | $_" }
-    if ($LASTEXITCODE -ne 0) { throw "Electron packaging failed." }
+if (Test-Path -LiteralPath $stagePkg) {
+    # The Electron package contains app.asar, so reusing this directory can
+    # silently ship stale renderer/main-process code after a source change.
+    # The heavyweight Python/model stages remain cached; only this small
+    # application package is rebuilt for every installer build.
+    Remove-Item -LiteralPath $stagePkg -Recurse -Force
+    Write-Host "  removed cached Electron package"
 }
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'app\node_modules\electron'))) {
+    Write-Host "  npm ci in app\..."
+    & npm.cmd ci --prefix (Join-Path $repoRoot 'app') 2>&1 | Select-Object -Last 3 | ForEach-Object { Write-Host "    | $_" }
+    if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
+}
+& node.exe (Join-Path $packagingDir 'package_app.js') $stagePkg 2>&1 | ForEach-Object { Write-Host "    | $_" }
+if ($LASTEXITCODE -ne 0) { throw "Electron packaging failed." }
 if (-not (Test-Path -LiteralPath (Join-Path $stagePkg 'Remote Voice-win32-x64\Remote Voice.exe'))) {
     throw "Packaged app missing after packaging step."
 }
@@ -267,15 +297,13 @@ Write-Step 7 "Assemble staging tree"
 $appStage = Join-Path $stageDir 'app'
 if (Test-Path -LiteralPath $appStage) { Remove-Item -LiteralPath $appStage -Recurse -Force }
 Copy-Item -LiteralPath (Join-Path $stagePkg 'Remote Voice-win32-x64') -Destination $appStage -Recurse
-# vc_redist rides along for the installer's [Run] step (deleteafterinstall).
-Copy-Item -LiteralPath $vcRedist -Destination (Join-Path $stageDir 'vc_redist.x64.exe') -Force
 
 # resources: python311\, engine\ (fresh copy — strip __pycache__), hf_cache\
 $resources = Join-Path $appStage 'resources'
 New-Item -ItemType Directory -Force -Path $resources | Out-Null
 Copy-Item -LiteralPath $stagePython -Destination (Join-Path $resources 'python311') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'engine\engine.py') -Destination (Join-Path $resources 'engine\engine.py') -Force
-Copy-Item -LiteralPath (Join-Path $stageHf) -Destination (Join-Path $resources 'hf_cache') -Recurse -Force
+Copy-Item -LiteralPath $stageHf -Destination (Join-Path $resources 'hf_cache') -Recurse -Force
 Write-Host "  staged: app payload + resources\python311 + resources\engine + resources\hf_cache"
 
 # ---------------------------------------------------------------------------
@@ -300,9 +328,35 @@ if (-not $iscc) {
 Write-Host "  ISCC: $iscc"
 
 New-Item -ItemType Directory -Force -Path $distributable | Out-Null
-& $iscc "/DSTAGEDIR=$stageDir" "/DOUTPUTDIR=$distributable" (Join-Path $packagingDir 'installer.iss') 2>&1 |
-    ForEach-Object { Write-Host "    | $_" }
-if ($LASTEXITCODE -ne 0) { throw "ISCC compilation failed (exit $LASTEXITCODE)." }
+# Inno Setup still has legacy MAX_PATH-sensitive file handling. A deep
+# OneDrive/repository path can push the bundled model files over that limit,
+# so compile through a temporary drive-letter mapping when possible.
+$compileExit = 0
+$substLetter = $null
+if ($repoRoot.Length -gt 100) {
+    foreach ($letter in @('R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')) {
+        if (-not (Test-Path -LiteralPath "${letter}:\")) {
+            $substLetter = $letter
+            break
+        }
+    }
+}
+
+if ($substLetter) {
+    & subst.exe "${substLetter}:" $repoRoot | Out-Null
+    try {
+        & $iscc "/DSTAGEDIR=${substLetter}:\packaging\stage" "/DOUTPUTDIR=${substLetter}:\distributable" "${substLetter}:\packaging\installer.iss" 2>&1 |
+            ForEach-Object { Write-Host "    | $_" }
+        $compileExit = $LASTEXITCODE
+    } finally {
+        & subst.exe "${substLetter}:" /D | Out-Null
+    }
+} else {
+    & $iscc "/DSTAGEDIR=$stageDir" "/DOUTPUTDIR=$distributable" (Join-Path $packagingDir 'installer.iss') 2>&1 |
+        ForEach-Object { Write-Host "    | $_" }
+    $compileExit = $LASTEXITCODE
+}
+if ($compileExit -ne 0) { throw "ISCC compilation failed (exit $compileExit)." }
 
 # ---------------------------------------------------------------------------
 # Step 9: Verify output

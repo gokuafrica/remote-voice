@@ -7,6 +7,7 @@ const { app } = require('electron');
 const DEFAULTS = {
   hotkey: 'right ctrl',
   mode: 'toggle',
+  auto_start: false,
   mic_device: null,
   sample_rate: 16000,
   voice_model: 'nemo-parakeet-tdt-0.6b-v2',

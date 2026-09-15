@@ -2,7 +2,6 @@
 
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const { BrowserWindow, ipcMain } = require('electron');
 
 function log(msg) {
@@ -142,7 +141,7 @@ class Recorder {
     }
   }
 
-  /** Stop capture, encode WAV, write to temp file. Returns {path, durationMs, bytes} or null. */
+  /** Stop capture and return PCM in memory. Returns {pcm, sampleRate, durationMs, bytes} or null. */
   isOpen() {
     return this.recording;
   }
@@ -174,11 +173,8 @@ class Recorder {
     }
     const pcm = Buffer.concat(frames);
     const durationMs = Math.round((pcm.length / 2 / 16000) * 1000);
-    const wav = encodeWav(pcm, 16000, 1);
-    const wavPath = path.join(os.tmpdir(), `remote-voice-${Date.now()}.wav`);
-    fs.writeFileSync(wavPath, wav);
-    log(`wav written: ${wavPath} (${pcm.length} pcm bytes, ${durationMs}ms, started with ${startFramesLen} frames)`);
-    return { path: wavPath, durationMs, bytes: wav.length };
+    log(`audio captured in memory (${pcm.length} pcm bytes, ${durationMs}ms, started with ${startFramesLen} frames)`);
+    return { pcm, sampleRate: 16000, durationMs, bytes: pcm.length };
   }
 
   async listMics() {
@@ -200,27 +196,6 @@ class Recorder {
     if (this.win && !this.win.isDestroyed()) this.win.destroy();
     this.win = null;
   }
-}
-
-function encodeWav(pcm, sampleRate, channels) {
-  const blockAlign = channels * 2;
-  const dataSize = pcm.length;
-  const buf = Buffer.alloc(44 + dataSize);
-  buf.write('RIFF', 0);
-  buf.writeUInt32LE(36 + dataSize, 4);
-  buf.write('WAVE', 8);
-  buf.write('fmt ', 12);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20); // PCM
-  buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(sampleRate * blockAlign, 28);
-  buf.writeUInt16LE(blockAlign, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write('data', 36);
-  buf.writeUInt32LE(dataSize, 40);
-  pcm.copy(buf, 44);
-  return buf;
 }
 
 module.exports = new Recorder();

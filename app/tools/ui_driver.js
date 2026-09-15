@@ -35,6 +35,7 @@ function parseArgs(argv) {
     else if (a === '--timeout') args.timeout = Number(argv[++i]);
     else if (a === '--mode') args.mode = argv[++i];
     else if (a === '--mic') args.mic = argv[++i];
+    else if (a === '--auto-start') args.autoStart = argv[++i];
     else args._.push(a);
   }
   return args;
@@ -121,6 +122,7 @@ async function readState(cdp) {
     const hint = document.getElementById('mic-hint');
     return {
       mode: checked ? checked.value : null,
+      auto_start: !!(document.getElementById('auto-start') && document.getElementById('auto-start').checked),
       mic_value: sel ? sel.value : null,
       mic_text: sel && sel.selectedOptions && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : null,
       mic_options: sel ? [...sel.options].map((o) => o.value) : null,
@@ -153,8 +155,8 @@ async function cmdRead(args) {
 }
 
 async function cmdSet(args) {
-  if (!args.mode && !args.mic) {
-    throw new Error('nothing to set: pass --mode <push_to_talk|toggle> and/or --mic <label|default>');
+  if (!args.mode && !args.mic && !args.autoStart) {
+    throw new Error('nothing to set: pass --mode, --mic, or --auto-start <on|off>');
   }
   const target = await findSettingsTarget(args.port, args.timeout ? args.timeout * 1000 : 30000);
   const cdp = new Cdp(target.webSocketDebuggerUrl);
@@ -194,6 +196,19 @@ async function cmdSet(args) {
         sel.value = opt.value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         return opt.textContent;
+      })()`);
+      await sleep(600);
+      await captureToast();
+      await sleep(400);
+    }
+    if (args.autoStart) {
+      const enabled = !['off', 'false', '0', 'no'].includes(String(args.autoStart).toLowerCase());
+      await cdp.eval(`(() => {
+        const input = document.getElementById('auto-start');
+        if (!input) throw new Error('auto-start control not found');
+        input.checked = ${enabled};
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return input.checked;
       })()`);
       await sleep(600);
       await captureToast();

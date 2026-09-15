@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
 
-const PROBE_TIMEOUT_MS = 20000;   // per python candidate: wait for first sign of life
+const PROBE_TIMEOUT_MS = 120000;  // bundled model may load before the first ping
 const READY_TIMEOUT_MS = 120000;  // model load budget
 const PING_TIMEOUT_MS = 15000;
 const TRANSCRIBE_TIMEOUT_MS = 30000;
@@ -213,7 +213,7 @@ class Engine extends EventEmitter {
     });
 
     // probe: first successful ping response locks the candidate
-    this.request('ping', {}, PING_TIMEOUT_MS)
+    this.request('ping', {}, PROBE_TIMEOUT_MS)
       .then(() => {
         clearTimeout(probeTimer);
         if (this.proc !== proc) return;
@@ -304,6 +304,16 @@ class Engine extends EventEmitter {
     return this.request('ping', {}, timeoutMs);
   }
 
+  transcribePcm(pcm, sampleRate = 16000, timeoutMs = TRANSCRIBE_TIMEOUT_MS) {
+    const bytes = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm);
+    return this.request('transcribe', {
+      pcm_s16le_b64: bytes.toString('base64'),
+      sample_rate: sampleRate,
+    }, timeoutMs);
+  }
+
+  // Kept for file-based engine clients and smoke tests. The desktop recorder
+  // uses transcribePcm so microphone audio never needs a temporary WAV file.
   transcribe(wavPath, timeoutMs = TRANSCRIBE_TIMEOUT_MS) {
     return this.request('transcribe', { wav_path: wavPath }, timeoutMs);
   }

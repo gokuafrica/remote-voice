@@ -1,5 +1,5 @@
 """
-Remote Voice engine — stdio sidecar (port of master/server.py pipeline).
+Remote Voice engine — stdio transcription sidecar.
 
 Speaks newline-delimited JSON over stdio (see SPEC.md "Engine contract").
 stdout carries protocol ONLY; all diagnostics go to stderr.
@@ -7,6 +7,7 @@ stdout carries protocol ONLY; all diagnostics go to stderr.
 Run:  python -u engine/engine.py --config <abs path to config.json>
 """
 
+import base64
 import glob
 import json
 import os
@@ -14,10 +15,10 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import asyncio
 import logging
+from contextlib import redirect_stdout
 from pathlib import Path
 
 # pythonw.exe has no console streams. Logging and protocol writes need
@@ -59,6 +60,7 @@ if _cuda_paths:
     os.environ["PATH"] = os.pathsep.join(_cuda_paths) + os.pathsep + os.environ.get("PATH", "")
 
 import httpx
+import numpy as np
 import onnx_asr
 from word2number import w2n
 
@@ -162,47 +164,59 @@ def _find_ffmpeg() -> str:
     return shutil.which("ffmpeg") or "ffmpeg"
 
 
-def convert_to_wav(input_path: str) -> str:
-    """Convert any audio format to 16kHz mono WAV using ffmpeg."""
-    wav_path = input_path + ".wav"
-    subprocess.run(
-        [_find_ffmpeg(), "-y", "-i", input_path, "-ar", "16000", "-ac", "1", wav_path],
+def decode_audio_bytes(audio_bytes: bytes) -> np.ndarray:
+    """Decode an audio container directly to a float32 waveform in memory."""
+    result = subprocess.run(
+        [
+            _find_ffmpeg(), "-v", "error", "-i", "pipe:0",
+            "-f", "f32le", "-ar", "16000", "-ac", "1", "pipe:1",
+        ],
+        input=audio_bytes,
         capture_output=True,
         check=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    return wav_path
+    if not result.stdout:
+        raise ValueError("audio decoded to an empty waveform")
+    return np.frombuffer(result.stdout, dtype="<f4").copy()
+
+
+def recognize_waveform(waveform, sample_rate: int = 16_000) -> str:
+    """Recognize a file path or in-memory NumPy waveform with retry handling."""
+    global model
+    try:
+        return str(model.recognize(waveform, sample_rate=sample_rate))
+    except Exception as e:
+        if "CUDA failure 999" in str(e) or "ONNXRuntimeError" in str(e):
+            log.warning(f"CUDA context lost ({e.__class__.__name__}) — reloading model and retrying...")
+            model = load_voice_model()
+            log.info("Model reloaded successfully.")
+            return str(model.recognize(waveform, sample_rate=sample_rate))
+        raise
+
+
+def transcribe_pcm(pcm_s16le: bytes, sample_rate: int = 16_000) -> str:
+    """Recognize signed 16-bit mono PCM without creating an audio file."""
+    if sample_rate not in (8_000, 16_000):
+        raise ValueError("sample_rate must be 8000 or 16000")
+    if not pcm_s16le:
+        raise ValueError("PCM audio is empty")
+    if len(pcm_s16le) % 2:
+        raise ValueError("PCM audio has an incomplete sample")
+    waveform = np.frombuffer(pcm_s16le, dtype="<i2").astype(np.float32) / 32768.0
+    return recognize_waveform(waveform, sample_rate)
 
 
 def transcribe_file(audio_path: str) -> str:
-    """Convert to WAV if needed, run Parakeet V2.
+    """Decode and transcribe an explicit file without creating a WAV.
 
     Handles CUDA error 999 (Windows TDR GPU driver reset) by reloading
     the model once and retrying. TDR invalidates the CUDA context in all
     running processes — a fresh model load creates a new context.
     """
-    global model
-    suffix = os.path.splitext(audio_path)[1].lower()
-    work_path = audio_path
-    wav_path = None
-
-    if suffix != ".wav":
-        wav_path = convert_to_wav(audio_path)
-        work_path = wav_path
-
-    try:
-        try:
-            return str(model.recognize(work_path))
-        except Exception as e:
-            if "CUDA failure 999" in str(e) or "ONNXRuntimeError" in str(e):
-                log.warning(f"CUDA context lost ({e.__class__.__name__}) — reloading model and retrying...")
-                model = load_voice_model()
-                log.info("Model reloaded successfully.")
-                return str(model.recognize(work_path))
-            raise
-    finally:
-        if wav_path and os.path.exists(wav_path):
-            os.unlink(wav_path)
+    with open(audio_path, "rb") as audio_file:
+        waveform = decode_audio_bytes(audio_file.read())
+    return recognize_waveform(waveform, 16_000)
 
 
 async def cleanup_with_ollama(raw_text: str, instruction: str = "") -> str:
@@ -586,17 +600,29 @@ def handle_ping(msg: dict) -> dict:
 
 def handle_transcribe(msg: dict) -> dict:
     global model_ready, model_error
+    pcm_b64 = msg.get("pcm_s16le_b64")
     wav_path = msg.get("wav_path")
-    if not wav_path or not os.path.isabs(wav_path):
-        return {"id": msg.get("id"), "ok": False, "error": "wav_path must be an absolute path"}
-    if not os.path.isfile(wav_path):
-        return {"id": msg.get("id"), "ok": False, "error": f"file not found: {wav_path}"}
+    pcm = None
+    sample_rate = msg.get("sample_rate", 16_000)
+    if pcm_b64 is not None:
+        if not isinstance(pcm_b64, str):
+            return {"id": msg.get("id"), "ok": False, "error": "pcm_s16le_b64 must be a string"}
+        try:
+            pcm = base64.b64decode(pcm_b64, validate=True)
+            sample_rate = int(sample_rate)
+        except (ValueError, TypeError, base64.binascii.Error) as e:
+            return {"id": msg.get("id"), "ok": False, "error": f"invalid PCM request: {e}"}
+    else:
+        if not wav_path or not os.path.isabs(wav_path):
+            return {"id": msg.get("id"), "ok": False, "error": "wav_path must be an absolute path"}
+        if not os.path.isfile(wav_path):
+            return {"id": msg.get("id"), "ok": False, "error": f"file not found: {wav_path}"}
     if model is None:
         return {"id": msg.get("id"), "ok": False, "error": model_error or "model not loaded"}
 
     try:
         t0 = time.perf_counter()
-        raw_text = transcribe_file(wav_path)
+        raw_text = transcribe_pcm(pcm, sample_rate) if pcm is not None else transcribe_file(wav_path)
         t1 = time.perf_counter()
         log.info(f"Transcription: {t1 - t0:.2f}s | raw: {raw_text}")
 
@@ -735,7 +761,11 @@ def main() -> None:
     # Preload the model BEFORE reading stdin so ping can report ready immediately.
     t0 = time.perf_counter()
     try:
-        model = load_voice_model()
+        # Some ONNX Runtime/provider paths print diagnostics directly to
+        # stdout. stdout is the strict JSON-lines protocol channel, so keep
+        # third-party model-loader output on stderr instead.
+        with redirect_stdout(sys.stderr):
+            model = load_voice_model()
         model_ready = True
         log.info(f"Voice model loaded in {time.perf_counter() - t0:.2f}s. Engine ready.")
     except Exception as e:

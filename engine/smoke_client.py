@@ -5,6 +5,7 @@ Electron app will: spawn as subprocess, newline-delimited JSON over stdio.
 Run:  python engine/smoke_client.py
 """
 
+import base64
 import json
 import os
 import shutil
@@ -12,10 +13,19 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 
 ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine.py")
 SEED_CONFIG = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config.json"))
 WAV = os.path.abspath(os.path.join(os.path.dirname(__file__), "testdata", "hello.wav"))
+
+
+def pcm_request_payload():
+    with wave.open(WAV, "rb") as wav:
+        if wav.getnchannels() != 1 or wav.getsampwidth() != 2 or wav.getframerate() != 16000:
+            raise AssertionError("hello.wav must be 16 kHz mono signed 16-bit PCM")
+        pcm = wav.readframes(wav.getnframes())
+    return base64.b64encode(pcm).decode("ascii")
 
 
 def main() -> int:
@@ -52,7 +62,8 @@ def main() -> int:
         print("FAIL: engine not ready")
         ok = False
 
-    send({"id": 2, "op": "transcribe", "wav_path": WAV})
+    pcm_b64 = pcm_request_payload()
+    send({"id": 2, "op": "transcribe", "pcm_s16le_b64": pcm_b64, "sample_rate": 16000})
     r = recv()
     print(f"transcribe: {json.dumps(r, ensure_ascii=False)}")
     if not r.get("ok"):
@@ -66,7 +77,7 @@ def main() -> int:
     fixes = recv()
     print(f"set_fixes: {fixes}")
 
-    send({"id": 4, "op": "transcribe", "wav_path": WAV})
+    send({"id": 4, "op": "transcribe", "pcm_s16le_b64": pcm_b64, "sample_rate": 16000})
     r2 = recv()
     print(f"transcribe after fixes: {json.dumps(r2, ensure_ascii=False)}")
     if r2.get("ok") and "planet" in r2.get("text", ""):

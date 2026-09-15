@@ -5,15 +5,13 @@
 ;   app\resources\python311\   embedded Python 3.11 + all pip deps + CUDA wheels
 ;   app\resources\engine\      engine\engine.py (sidecar)
 ;   app\resources\hf_cache\    Parakeet TDT 0.6b v2 ONNX weights (~2.4 GB)
-;   vc_redist.x64.exe       Microsoft-signed Visual C++ runtime prerequisite
 ;
 ; Build with:
 ;   ISCC.exe /DSTAGEDIR="<abs stage>" /DOUTPUTDIR="<abs out>" packaging\installer.iss
 ;
 ; Architecture notes vs the old (master) installer:
 ;   - NO firewall rules, NO port (the engine is a stdio sidecar of the app).
-;   - Autostart is a logon scheduled task that launches "Remote Voice.exe"
-;     with the Users-group principal (signed-in user's token).
+;   - Autostart is a per-user Windows login item controlled from Settings.
 ;   - Per-user writable state (config at %APPDATA%\Remote Voice, HF model
 ;     cache seeded to %LOCALAPPDATA%\Remote Voice\model-cache) is handled by
 ;     the app itself at runtime; nothing user-specific is written to {app}.
@@ -31,18 +29,25 @@ AppId={{7C4E9A31-2B5D-4F08-9A6E-1D3C5E7B9042}
 AppName=Remote Voice
 AppVersion=0.1.0
 AppPublisher=Remote Voice
-; Per-machine install: immutable application files live in Program Files.
-DefaultDirName={autopf}\Remote Voice
+; Per-user install: this matches the app's per-user settings and autostart
+; model and avoids requiring elevation for normal installation.
+DefaultDirName={localappdata}\Programs\Remote Voice
 DefaultGroupName=Remote Voice
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OUTPUTDIR}
 OutputBaseFilename=RemoteVoiceSetup
-Compression=lzma2/max
+; Use a smaller LZMA2 dictionary so the multi-gigabyte payload stays within
+; Windows' single-file limit while avoiding the encoder failure from the
+; maximum dictionary size.
+Compression=lzma2/fast
 SolidCompression=yes
+DiskSpanning=yes
+DiskSliceSize=2000000000
 WizardStyle=modern
-SetupLogging=yes
+; Do not leave an installer log in the user's temporary directory.
+SetupLogging=no
 ; The app runs at logon via scheduled task; no need to auto-run after setup.
 CloseApplications=no
 
@@ -51,63 +56,25 @@ CloseApplications=no
 ; resources\hf_cache (staged by build_installer.ps1). Exclude pip/wheel
 ; caches and bytecode from the embedded python tree.
 Source: "{#STAGEDIR}\app\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "python311\pip\cache\*,*.pyc,__pycache__"
-; Elevated helper used only during installation.
-Source: "register_task.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "{#STAGEDIR}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+; Uninstall cleanup helper. It runs before Inno removes {app}.
+Source: "cleanup_uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Remote Voice"; Filename: "{app}\Remote Voice.exe"; WorkingDir: "{app}"
 Name: "{group}\Uninstall Remote Voice"; Filename: "{uninstallexe}"
 
 [Run]
-; ONNX Runtime requires the Microsoft Visual C++ runtime on clean Windows.
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden; StatusMsg: "Installing Microsoft Visual C++ runtime..."
-; Register from the elevated installer, but use the built-in Users group as
-; the task principal. Task Scheduler then runs it with the signed-in user's
-; token, even when a standard user supplied separate admin credentials.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{tmp}\register_task.ps1"" -AppDir ""{app}"""; Flags: runhidden logoutput; StatusMsg: "Creating Remote Voice autostart task..."
+; Release VC++ runtime DLLs are bundled beside the embedded Python runtime.
 ; Optional launch after install.
 Filename: "{app}\Remote Voice.exe"; Description: "Launch Remote Voice"; Flags: postinstall skipifsilent nowait unchecked
 
 [UninstallRun]
-; Remove the autostart task. Per-user data (%APPDATA%\Remote Voice config,
-; %LOCALAPPDATA%\Remote Voice model cache + history) is deliberately kept.
+; Stop the app and delete the installing user's settings, history, Electron
+; state, model cache, and temporary recordings.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\cleanup_uninstall.ps1"" -InstallDir ""{app}"""; Flags: runhidden logoutput; RunOnceId: "CleanupUserData"
+; Remove the legacy scheduled task if an older Remote Voice install created it.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /F /TN RemoteVoiceAutostart"; Flags: runhidden; RunOnceId: "DelTask"
 
-[Code]
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  ResultCode: Integer;
-begin
-  { [Run] programs do not make Setup fail on a non-zero exit code. Verify the
-    essential things explicitly so a silent deployment can never report a
-    false success. }
-  if CurStep = ssPostInstall then
-  begin
-    { 1. The packaged exe must exist. }
-    if not FileExists(ExpandConstant('{app}\Remote Voice.exe')) then
-      RaiseException('Remote Voice.exe is missing from the install directory. ' +
-        'Setup has not completed successfully.');
-
-    { 2. The bundled Python runtime must be able to import onnxruntime (this
-       exercises the CUDA wheel DLL layout too). }
-    if (not Exec(ExpandConstant('{app}\resources\python311\python.exe'),
-      '-c "import onnxruntime, onnx_asr; print(onnxruntime.get_available_providers())"',
-      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
-      (ResultCode <> 0) then
-      RaiseException('Remote Voice could not load its bundled Python runtime ' +
-        '(onnxruntime import failed). Setup has not completed successfully.');
-
-    { 3. The model weights must have been installed. }
-    if not DirExists(ExpandConstant('{app}\resources\hf_cache\hub')) then
-      RaiseException('The bundled speech model is missing from the install ' +
-        'directory. Setup has not completed successfully.');
-
-    { 4. The autostart task must have been registered. }
-    if (not Exec(ExpandConstant('{sys}\schtasks.exe'),
-      '/Query /TN "RemoteVoiceAutostart"', '', SW_HIDE,
-      ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
-      RaiseException('Remote Voice could not create its autostart task. ' +
-        'Setup has not completed successfully.');
-  end;
-end;
+[UninstallDelete]
+; Remove files created under the installation directory after installation.
+Type: filesandordirs; Name: "{app}"

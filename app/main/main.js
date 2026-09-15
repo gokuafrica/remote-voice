@@ -12,6 +12,7 @@ if (process.env.RV_TEST_CMD) {
 }
 
 const config = require('./config');
+const autostart = require('./autostart');
 const state = require('./state');
 const engine = require('./engine');
 const hotkey = require('./hotkey');
@@ -66,6 +67,16 @@ function migrateLegacyData() {
 function applyChange(patch) {
   config.set(patch || {});
   const cfg = config.get();
+  let autoStart = null;
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'auto_start')) {
+    try {
+      autoStart = autostart.sync(app, cfg.auto_start);
+      log(`auto-start ${autoStart.enabled ? 'enabled' : 'disabled'}`);
+    } catch (e) {
+      autoStart = { supported: true, enabled: false, error: e.message };
+      log(`auto-start update failed: ${e.message}`);
+    }
+  }
   if (patch && Object.prototype.hasOwnProperty.call(patch, 'pronunciation_fixes')) {
     engine.setFixes(cfg.pronunciation_fixes).catch((err) => {
       log(`set_fixes after save failed: ${err.message}`);
@@ -74,6 +85,7 @@ function applyChange(patch) {
   hotkey.applyConfig(cfg);
   tray.rebuildMenu();
   log(`config applied: mode=${cfg.mode} mic=${cfg.mic_device === null ? 'System Default' : cfg.mic_device}`);
+  return { autoStart };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -102,7 +114,15 @@ if (!app.requestSingleInstanceLock()) {
 
 async function onReady() {
   migrateLegacyData();
+  cleanupWavFiles();
   config.load();
+  if (!SMOKE) {
+    try {
+      autostart.sync(app, config.get().auto_start);
+    } catch (e) {
+      log(`auto-start initialization failed: ${e.message}`);
+    }
+  }
   history.setConfigRef(config.get());
   Menu.setApplicationMenu(null);
 
@@ -166,7 +186,10 @@ async function onReady() {
   ipcMain.handle('settings:defaults', () => JSON.parse(JSON.stringify(config.DEFAULTS)));
   ipcMain.handle('engine:status:get', () => lastEngineStatus);
   ipcMain.handle('settings:save', async (e, cfg) => {
-    applyChange(cfg);
+    const result = applyChange(cfg);
+    if (result.autoStart && result.autoStart.error) {
+      throw new Error(`Could not update Windows sign-in startup: ${result.autoStart.error}`);
+    }
     return true;
   });
   ipcMain.handle('mics:list', async () => recorder.listMics());
@@ -252,7 +275,7 @@ async function stopRecording() {
       state.set('IDLE', { reason: 'too short' });
       return;
     }
-    const resp = await engine.transcribe(result.path);
+    const resp = await engine.transcribePcm(result.pcm, result.sampleRate);
     const text = (resp.text || '').trim();
     log(`transcribe result: ${text.length} chars: ${text.slice(0, 120)}`);
     if (text) {
@@ -277,7 +300,16 @@ async function cancelRecording(reason) {
 }
 
 function cleanupWavFiles() {
-  // leave temp wav files for debugging; OS cleans tmpdir. No-op by design.
+  // Remove stale files from versions that used the file-based recorder.
+  // Current recordings never create these files.
+  const fs = require('fs');
+  const os = require('os');
+  try {
+    for (const name of fs.readdirSync(os.tmpdir())) {
+      if (!/^remote-voice-\d+\.wav$/i.test(name)) continue;
+      try { fs.unlinkSync(require('path').join(os.tmpdir(), name)); } catch (_) { /* best effort */ }
+    }
+  } catch (_) { /* best effort */ }
 }
 
 app.on('before-quit', () => {

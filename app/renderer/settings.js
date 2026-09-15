@@ -50,6 +50,7 @@
     config.hotkey = $('hotkey-display').textContent;
     const mode = document.querySelector('input[name="mode"]:checked');
     if (mode) config.mode = mode.value;
+    config.auto_start = $('auto-start').checked;
     config.mic_device = $('mic-select').value === 'default' ? null : $('mic-select').value;
     config.use_llm = $('use-llm').checked;
     config.ollama_url = $('ollama-url').value.trim();
@@ -207,6 +208,8 @@
       if (radio.checked) saveAll(); // instant: discrete control
     });
   }
+
+  $('auto-start').addEventListener('change', () => saveAll());
 
   // ------------------------------------------------------------------- LLM
 
@@ -519,6 +522,7 @@
     renderHotkey();
     const modeInput = document.querySelector(`input[name="mode"][value="${config.mode === 'push_to_talk' ? 'push_to_talk' : 'toggle'}"]`);
     if (modeInput) modeInput.checked = true;
+    $('auto-start').checked = !!config.auto_start;
     $('use-llm').checked = !!config.use_llm;
     $('llm-collapse').classList.toggle('open', !!config.use_llm);
     $('ollama-url').value = config.ollama_url || '';

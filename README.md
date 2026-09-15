@@ -1,558 +1,70 @@
 # Remote Voice
 
-Local voice transcription pipeline that runs on your own hardware. Record voice on your phone or PC, get cleaned text back — powered by NVIDIA Parakeet V2 with fast regex-based post-processing.
+Remote Voice is a Windows desktop voice-dictation application. The installed
+product is an Electron shell with a Python transcription sidecar, packaged by
+the installer sources in `packaging/`.
 
-Think WhisperFlow / Superwhisper, but fully local, GPU-accelerated, and with built-in voice commands for formatting, punctuation, and editing.
+## Source layout
 
-## How It Works
-
-```
-Phone or PC Mic
-      |
-      v
-  FastAPI Server (port 8787)
-      |
-      +-- ffmpeg (convert to WAV if needed)
-      |
-      +-- Parakeet V2 via ONNX Runtime (GPU transcription, ~0.3-0.5s)
-      |
-      +-- Regex cleanup (fillers, numbers, punctuation, commands, <5ms)
-      |
-      +-- [Optional] Ollama LLM (only when you say "deep format")
-      |
-      v
-  Cleaned text returned
-      |
-      +-- Phone: inserted into any app via whisper-to-input keyboard
-      +-- PC: pasted into focused window via tray app hotkey
+```text
+app/                         Electron main, preload, renderer, and tests
+config.json                  Seed configuration for development and packaging
+engine/                      Python sidecar, requirements, tests, and test data
+packaging/                   Electron packaging and Inno Setup sources
+  build_installer.ps1
+  installer.iss
+  package_app.js
+  cleanup_uninstall.ps1
 ```
 
-By default, no LLM is used. Regex handles all deterministic cleanup tasks in under 5ms. You can explicitly invoke the LLM for semantic tasks (self-corrections, filler "like" disambiguation) by ending your dictation with **"deep format"**.
+The root Python server, GUI, tray clients, and their dependency files are not
+part of this application. The only Python runtime source is `engine/engine.py`,
+which the Electron app starts as a stdio JSON sidecar.
 
-## Voice Commands
+## Development
 
-These commands are recognized during dictation and processed by the regex pipeline.
+Install the locked Electron dependencies from the repository root:
 
-**Parakeet compatibility:** Parakeet V2 adds its own punctuation — it may insert commas around pauses and hyphens between multi-word phrases. For example, if you pause around "new line", Parakeet might output `hello, new line, world` or `hello, new-line, world`. All voice commands and spoken punctuation patterns handle this automatically: commas/periods before and after the command are consumed, and hyphens between command words are accepted.
-
-### Formatting
-
-| You say | Result | Example |
-|---------|--------|---------|
-| **new line** | Inserts a line break | "first line **new line** second line" → `first line`<br>`second line` |
-| **new paragraph** | Inserts a paragraph break (double newline) with a period before it | "intro text **new paragraph** body text" → `intro text.`<br><br>`body text` |
-
-### Editing
-
-| You say | Result | Example |
-|---------|--------|---------|
-| **scratch that** | Deletes the current and preceding sentence (respects line/paragraph boundaries) | "I need apples. Get oranges. **Scratch that.**" → `I need apples.` |
-| **start over** | Deletes everything before it, keeps only what follows | "blah blah **start over** the real message" → `The real message` |
-
-### Numbered Lists
-
-Start each item with **"bullet N"** and end the list with **"end list"**. Both markers must be present — if you say "bullet" without "end list", it's treated as the regular word.
-
-| You say | Result |
-|---------|--------|
-| "**Bullet 1** apples **bullet 2** bananas **bullet 3** oranges **end list**" | `1. Apples`<br>`2. Bananas`<br>`3. Oranges` |
-| "Here are my items. **Bullet 1** apples. **Bullet 2** bananas. **End list.** That is all." | `Here are my items.`<br>`1. Apples`<br>`2. Bananas`<br>`That is all.` |
-| "The bullet hit the wall" | `The bullet hit the wall` (unchanged — no "end list") |
-
-### Spoken Punctuation
-
-Say the punctuation name and it gets replaced with the symbol.
-
-| You say | Result |
-|---------|--------|
-| **comma** | `,` |
-| **period** | `.` |
-| **question mark** | `?` |
-| **exclamation point** | `!` |
-| **colon** | `:` |
-| **semicolon** | `;` |
-| **hyphen** / **dash** | `-` |
-| **ellipsis** | `...` |
-| **slash** | `/` |
-| **apostrophe** | `'` |
-| **quotation mark** / **double quote** | `"` |
-| **single quote** | `'` |
-| **open parenthesis** | `(` |
-| **close parenthesis** | `)` |
-| **percent sign** | `%` |
-
-**Examples:**
-
-| You say | You get |
-|---------|---------|
-| "dear sir **comma** the answer is no **period**" | `Dear sir, the answer is no.` |
-| "is this correct **question mark**" | `Is this correct?` |
-| "it **apostrophe** s fine" | `It's fine` |
-| "use **open parenthesis** optional **close parenthesis**" | `Use (optional)` |
-
-### Emojis
-
-Say an emoji phrase and it gets replaced with the emoji character. Parakeet comma/hyphen compatibility is handled automatically — "smiley, face", "smiley-face", and "smiley face" all produce 😊.
-
-**Unambiguous phrases** — used directly:
-
-| You say | You get |
-|---------|---------|
-| **smiley face** | 😊 |
-| **laughing face** | 😂 |
-| **winking face** | 😉 |
-| **thinking face** | 🤔 |
-| **raised eyebrow** | 🤨 |
-| **face palm** / **facepalm** | 🤦 |
-| **eye roll** | 🙄 |
-| **thumbs up** | 👍 |
-| **thumbs down** | 👎 |
-| **clapping hands** | 👏 |
-| **waving hand** | 👋 |
-| **crossed fingers** | 🤞 |
-| **folded hands** | 🙏 |
-| **ok hand** | 👌 |
-| **peace sign** | ✌️ |
-| **check mark** | ✅ |
-| **red x** | ❌ |
-| **party popper** | 🎉 |
-| **broken heart** | 💔 |
-
-**Ambiguous words** — require an explicit "emoji" suffix to avoid converting common English words:
-
-| You say | You get |
-|---------|---------|
-| **heart emoji** | ❤️ |
-| **fire emoji** | 🔥 |
-| **star emoji** | ⭐ |
-| **hundred emoji** | 💯 |
-| **shrug emoji** | 🤷 |
-| **muscle emoji** | 💪 |
-| **sparkles emoji** | ✨ |
-| **rocket emoji** | 🚀 |
-| **skull emoji** | 💀 |
-| **poop emoji** | 💩 |
-
-Standalone uses of "heart", "fire", "star", etc. are left unchanged.
-
-### Numbers
-
-Number words are automatically converted to digits. Multi-word numbers and "percent" are supported.
-
-| You say | You get |
-|---------|---------|
-| "I need **twenty five** dollars" | `I need 25 dollars` |
-| "**one hundred and thirty five**" | `135` |
-| "the price is **ten percent** higher" | `The price is 10% higher` |
-
-The words "I" and "a" are never converted to numbers.
-
-### Filler Words
-
-**um**, **uh**, and **you know** are automatically removed. The word **like** is deliberately *not* removed by regex because it can't distinguish filler ("it was like super hard") from verb ("I like this"). Use the **"deep format"** command if you need filler "like" cleaned up.
-
-### Pronunciation Fixes
-
-If Parakeet consistently mishears a word or phrase due to your accent, you can define pronunciation fixes. These run before all other processing — the mispronounced words are silently replaced with the correct ones, and then the pipeline handles them normally.
-
-Configure fixes in the GUI under **Pronunciation Fixes** (format: `wrong = correct`, one per line), or in `config.json`:
-
-```json
-{
-    "pronunciation_fixes": {
-        "new lion": "new line"
-    }
-}
+```powershell
+npm.cmd ci --prefix app
 ```
 
-**How it works:** The fix replaces the mispronounced words with the correct words in the raw transcript. Parakeet hyphens between alias words are handled automatically (e.g., "new-lion" also matches). Surrounding punctuation (commas, periods) is left untouched — the downstream voice command regex handles that as usual.
+Run the Electron shell directly when working on the source:
 
-| Parakeet hears | Fix produces | Pipeline result |
-|---|---|---|
-| "hello **new lion** world" | "hello **new line** world" | `hello`<br>`world` |
-| "hello, **new-lion**, world" | "hello, **new line**, world" | `hello`<br>`world` |
-
-**Important:** Every occurrence of the mispronounced phrase will be replaced — the fix doesn't know whether you meant it literally. Only add entries you're confident won't appear naturally in your speech. The server must be restarted after changing fixes.
-
-### Punctuation Behavior
-
-**Parakeet's punctuation is trusted.** The pipeline does not force a trailing period onto your text. If Parakeet adds a period at the end, it stays. If it doesn't (e.g., for sentence fragments or questions), nothing is added. This means the output preserves Parakeet's own judgment about sentence structure.
-
-**Period removal before manual punctuation:** When you dictate spoken punctuation (e.g., "comma", "question mark"), Parakeet may have already added a period before it — thinking the sentence ended. The pipeline automatically removes that stale period. For example, Parakeet might output `"Dear sir. Comma the answer is no."` and the pipeline produces `Dear sir, the answer is no.` (the period before "comma" is cleaned up).
-
-**Duplicate comma collapse:** If Parakeet adds a comma at a natural pause and you also say "comma", the resulting double comma (`,,`) is automatically collapsed to a single comma.
-
-**Punctuation preserved before new line:** If Parakeet adds a period or comma before "new line", it is preserved. For example, `"end of sentence. New line next sentence"` produces `end of sentence.` followed by a line break, and `"Dear President, new line, hello"` produces `Dear President,` followed by a line break.
-
-### Deep Format — LLM Post-Processing (Optional)
-
-End your dictation with **"deep format"** to route the text through the configured Ollama model after regex cleanup. The regex pipeline runs first (fillers, numbers, punctuation all handled), then the LLM receives already-cleaned text and only handles semantic tasks:
-
-- **Self-corrections**: "I need four, sorry, I meant two" → `I need 2`
-- **Filler "like" removal**: "I like this but like we should go" → `I like this, but we should go.`
-- **Natural restatements**: Keeps only the final version when you rephrase
-- **Grammar smoothing**: Fixes awkward phrasing left after filler removal
-
-#### Custom Instructions
-
-Anything you say after **"deep format"** becomes a custom instruction to the LLM:
-
-| You say | What happens |
-|---------|-------------|
-| "...text **deep format**" | Standard deep format (self-corrections, filler removal, etc.) |
-| "...text **deep format** check the math" | Deep format + LLM also verifies the math |
-| "...text **deep format** check the facts" | Deep format + LLM also fact-checks the content |
-| "...text **deep format** make it formal" | Deep format + LLM also adjusts the tone |
-| "...text **deep format** like an email" | Deep format + LLM also formats as an email |
-
-The custom instruction is prefixed with "format:" and injected into the cleanup prompt as an additional directive — the standard cleanup rules still apply. This means the LLM will clean the transcript *and* follow your instruction, without throwing away the conservative cleanup behavior that keeps transcriptions accurate.
-
-**Examples:**
-
-| You say | You get |
-|---------|---------|
-| "2 + 2 is 5. **deep format** check the math" | `2 + 2 is 4.` |
-| "The Eiffel Tower is in London. **deep format** check the facts" | `The Eiffel Tower is in Paris.` |
-| "hey can u come 2morrow. **deep format** make it formal" | `Can you come tomorrow?` |
-
-**Email formatting example** — dictate a stream-of-consciousness message and let the LLM add structure:
-
-> **You say:** "Hey Sarah thanks for the update on the deployment. Two things first the staging environment is ready and QA signed off on all the test cases. Second we found a minor bug in the payment flow where the discount code field doesn't clear after submission but Jake is already on it and should have a fix by end of day. Oh and one more thing can we schedule a quick sync tomorrow morning to go over the launch checklist? Let me know what time works for you. Thanks **deep format** like an email"
-
-> **You get:**
-> ```
-> Hey Sarah,
->
-> Thanks for the update on the deployment.
->
-> First, the staging environment is ready, and QA has signed off on all test cases.
-> Second, we found a minor bug in the payment flow where the discount code field
-> doesn't clear after submission. But Jake is already on it, and he should have
-> a fix by the end of the day.
->
-> Oh, one more thing: can we schedule a quick sync tomorrow morning to go over
-> the launch checklist? Let me know what time works for you.
->
-> Thanks
-> ```
-
-#### Known Quirks (qwen2.5:7b)
-
-- The LLM reliably handles clear corrections ("sorry I meant", "no wait", "I mean", "actually X"). `"Send it to John, no wait, Mike. deep format"` → `Send it to Mike.`
-- `"I'm sorry for the delay"` stays intact — the LLM correctly identifies this as a natural apology, not a self-correction.
-- However, the LLM sometimes over-corrects borderline cases. For example, it may remove a natural "actually" from `"I actually think this is great"` → `I think this is great.` This is the model being overly aggressive, not a pipeline bug.
-- Similarly, `"I'm sorry but X"` may get shortened to just `X` because "sorry + but" looks like a correction pattern to the model.
-- The LLM may rephrase slightly (e.g., "I'm sorry" → "I apologize"). This is the grammar smoothing task doing its job, but it means output won't always be word-for-word identical to the input.
-
-These quirks are inherent to using a 7B parameter model for semantic tasks. For most dictation use cases — correcting mistakes, removing filler "like", cleaning up restatements — it works well.
-
-**Note:** The LLM adds ~0.5-1s per sentence (model kept warm in VRAM via `keep_alive: -1`). Without the trigger, responses are near-instant (~0.5s total).
-
-## Components
-
-| Component | File | What it does |
-|-----------|------|-------------|
-| **Server** | `server.py` | Accepts audio, transcribes + cleans, returns text |
-| **Server GUI** | `gui.py` | Configure models, prompt, start/stop server, view logs |
-| **Tray App** | `tray.py` | System tray hotkey — record mic, transcribe, paste into any app. Supports remote servers over Tailscale |
-| **Mac Client** | `mac_tray.py` | macOS menu bar client — same as tray app but for Mac, connects to Windows server over Tailscale |
-| **Phone Client** | [whisper-to-input](https://github.com/j3soon/whisper-to-input) | Android keyboard that sends audio to the server |
-| **Tests** | `tests.py` | 138 tests covering configuration, regex pipeline, and LLM deep format path |
-
-## Setup
-
-### Prerequisites
-
-- Windows 11 with NVIDIA GPU (tested on RTX 4070 Ti)
-- Python 3.10+
-- [Ollama](https://ollama.ai) running locally with a model (e.g. `ollama pull qwen2.5:7b`) — only needed if you plan to use the "deep format" command
-- [Tailscale](https://tailscale.com) (for phone access from anywhere)
-
-### Install
-
-For the bundled Windows build, run `RemoteVoiceSetup.exe`. The installer adds
-the port 8787 firewall rule and creates the `RemoteVoiceServer` logon task.
-It also installs Microsoft's Visual C++ x64 runtime required by ONNX Runtime.
-Application files are installed in Program Files; your editable `config.json`
-and `tray_config.json` are kept in `%LOCALAPPDATA%\Remote Voice`, so settings
-work for standard Windows accounts and survive uninstall/reinstall.
-The server prefers an NVIDIA GPU but falls back to CPU if CUDA cannot initialize
-(CPU transcription is slower). The speech model downloads on first launch, so
-the PC needs an Internet connection once even though Python dependencies are bundled.
-
-To run from source instead, install the dependencies below:
-
-```bash
-pip install -r requirements.txt
-pip install onnxruntime-gpu
-pip install nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-cusparse-cu12 nvidia-cusolver-cu12 nvidia-curand-cu12 nvidia-nvjitlink-cu12
+```powershell
+npm.cmd --prefix app run start
 ```
 
-On Windows, `pip install -r requirements.txt` now also installs `pywin32`, which the tray app uses to preserve non-text clipboard contents while still pasting dictation instantly.
+The app finds `engine/engine.py` and the seed `config.json` from the repository
+in development. Packaged runs use the copies placed in the Electron resources
+directory.
 
-FFmpeg is also required for audio format conversion:
-```bash
-winget install Gyan.FFmpeg
+## Packaging
+
+The optional Electron package is written to the ignored `dist/` directory:
+
+```powershell
+npm.cmd --prefix app run package
 ```
 
-A few things are handled automatically:
-- ffmpeg is detected from a bundled `ffmpeg\` folder next to the scripts first, falling back to `ffmpeg` on PATH.
-- If Ollama isn't running, the "deep format" command still works — you get the regex-cleaned text without LLM polish instead of an error.
-- CUDA DLLs from the nvidia pip wheels are located automatically whether they were installed with `--user` or into a venv/embedded Python.
+The complete Windows installer is built with:
 
-The Parakeet V2 ONNX model (~2 GB) downloads automatically from HuggingFace on first server start.
-
-### One-Time Admin Setup
-
-Right-click `setup.bat` > "Run as administrator". This creates:
-- A Windows Firewall rule for port 8787
-- A scheduled task to auto-start the server at login
-
-### Mac Client Setup
-
-The Mac client records audio via hotkey and sends it to the Windows server over Tailscale. No transcription runs on the Mac.
-
-```bash
-brew install portaudio ffmpeg
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements-mac.txt
-python mac_tray.py
+```powershell
+pwsh packaging/build_installer.ps1
 ```
 
-Each new terminal session, activate the venv before running:
-```bash
-source venv/bin/activate
-python mac_tray.py
-```
-
-On first run, click the menu bar icon and select **"Server URL..."** to enter your Windows PC's Tailscale IP (e.g. `http://100.x.y.z:8787`).
-
-**Required macOS permissions** (System Settings > Privacy & Security):
-- **Accessibility** — add Terminal.app (for hotkey suppression and paste simulation)
-- **Input Monitoring** — add Terminal.app (for global hotkey detection)
-- **Microphone** — prompted automatically on first recording
-
-**Mac diagnostics:** The menu bar app now logs timed audio lifecycle steps for mic open/close, including `starting` / `stopping` state transitions. If a Core Audio or PortAudio call hangs for more than ~2 seconds, the app writes a full Python thread dump to the terminal automatically. The menu also includes **"Run Mic Stress Test (25x)"**, which repeatedly opens and closes the built-in mic without sending audio to the server. If a mic open/close hang is detected during normal use, the app disables further recording attempts until restart instead of silently retrying against a wedged audio engine.
-
-### Phone Setup
-
-1. Install [whisper-to-input APK](https://github.com/j3soon/whisper-to-input/releases)
-2. Backend: **Whisper ASR Webservice**
-3. Endpoint: `http://<your-tailscale-ip>:8787/asr`
-4. Language: `en`
-5. Enable the keyboard in Android Settings > Languages & Input
-
-## Usage
-
-### Start the Server
-
-Double-click `Remote Voice.bat` to open the GUI. Click **Start Server**.
-
-Or run directly:
-```bash
-python server.py
-```
-
-### From Your Phone
-
-Switch to the Whisper to Input keyboard in any app, tap the mic button, speak. Text appears in the text field.
-
-### From Your PC
-
-Launch `Remote Voice Tray.bat`. A mic icon appears in the system tray. Use the configured hotkey (default: `Right Ctrl`) to toggle recording on or off. Right-click the tray icon to select microphone, recording mode (push-to-talk or toggle), and server URL.
-
-The tray app can connect to a remote server over Tailscale — right-click the tray icon and select **"Server URL..."** to enter the server's Tailscale IP (e.g. `http://100.x.y.z:8787`). By default, it connects to `localhost`. Audio is compressed via ffmpeg (OGG/Opus) before sending to reduce upload size over the network; if ffmpeg is not installed, it falls back to uncompressed WAV.
-
-On Windows, the tray app preserves the full clipboard when it pastes dictated text, so copied files, images, and other non-text clipboard contents should remain intact after dictation.
-
-On macOS, the `Cmd+'` hotkey is suppressed until the apostrophe key is physically released, so a stray leading `'` should not leak into the focused app if you release `Cmd` slightly before the `'` key.
-
-## Configuration
-
-All settings are managed through the GUI (`Remote Voice.bat`), or by editing the JSON files directly.
-
-### config.json (Server)
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `server_port` | Server listening port | `8787` |
-| `ollama_url` | Ollama API URL | `http://localhost:11434` |
-| `ollama_model` | LLM for transcript cleanup (used only with "deep format") | `qwen2.5:7b` |
-| `voice_model` | Speech-to-text model | `nemo-parakeet-tdt-0.6b-v2` |
-| `cleanup_prompt` | Instructions sent to the LLM when explicitly triggered | See config.json |
-
-### tray_config.json (Tray App)
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `server_url` | Server URL for remote connections (e.g. `http://100.x.y.z:8787`), or `null` for localhost | `null` |
-| `hotkey` | Global hotkey for recording | `right ctrl` |
-| `mic_device` | Microphone name (or null for system default) | `null` |
-| `sample_rate` | Audio sample rate (Hz) | `16000` |
-| `mode` | `push_to_talk` (hold) or `toggle` (press twice) | `toggle` |
-
-## API Endpoints
-
-The server exposes two transcription endpoints:
-
-**Whisper ASR Webservice format** (used by whisper-to-input):
-```
-POST /asr?encode=true&task=transcribe&language=en&output=txt
-Content-Type: multipart/form-data
-Body: audio_file=<audio bytes>
-Response: plain text
-```
-
-**OpenAI Whisper format**:
-```
-POST /v1/audio/transcriptions
-Content-Type: multipart/form-data
-Body: file=<audio bytes>, model=parakeet, response_format=json
-Response: {"text": "..."}
-```
-
-**Keepalive / root**:
-```
-HEAD /  or  GET /
-Response: "ok" (200)
-```
-Used by tray apps to keep Tailscale tunnels warm.
-
-**Health check**:
-```
-GET /health
-Response: {"status": "ok", "model": "...", "llm": "..."}
-```
-
-## Supported Voice Models
-
-Any model supported by [onnx-asr](https://github.com/istupakov/onnx-asr):
-
-| Model | Language | Notes |
-|-------|----------|-------|
-| `nemo-parakeet-tdt-0.6b-v2` | English | Default. Best accuracy for English. |
-| `nemo-parakeet-tdt-0.6b-v3` | 25 European languages | Multilingual variant |
-| `nemo-parakeet-ctc-0.6b` | English | CTC variant |
-| `nemo-canary-1b-v2` | Multilingual | Larger, more accurate |
-| `whisper` | Multilingual | OpenAI Whisper via onnx-community |
-| `whisper-ort` | Multilingual | Whisper via ONNX Runtime |
-
-Models download automatically from HuggingFace on first use.
-
-## Performance
-
-On RTX 4070 Ti with Parakeet V2:
-
-| Path | Latency | When |
-|------|---------|------|
-| Default (regex only) | ~0.3-0.5s | Every transcription |
-| With LLM (regex + Ollama) | ~5-20s | Only when you say "deep format" |
-
-The regex cleanup adds <5ms on top of transcription time. The LLM is kept loaded in VRAM (`keep_alive: -1`) to eliminate cold start delays when explicitly invoked.
-
-## Testing
-
-The test suite lives in `tests.py` and covers both the regex pipeline (deterministic) and the LLM deep format path (requires Ollama).
-
-```bash
-python tests.py              # Run all tests (regex + LLM)
-python tests.py --regex-only # Regex tests only (no Ollama needed)
-python tests.py --llm-only   # LLM tests only
-python mac_tray_tests.py     # Mac tray diagnostic helper tests
-```
-
-**Part 1 — Deterministic tests (124 tests):** Exact-match cleanup tests plus configuration-path, headless-start, and GPU/CPU provider-selection checks. These cover filler removal, number conversion, spoken punctuation, editing commands, model fallback, and packaged configuration behavior. They do not need Ollama.
-
-**Part 2 — LLM tests (14 tests):** End-to-end tests that send text through the full deep format path (regex cleanup → Ollama). These verify self-corrections, natural usage preservation, filler "like" disambiguation, restatements, the combined regex+LLM pipeline, and custom instructions (math checking, fact checking, formality). Because LLM output is non-deterministic, these tests check properties (must contain / must not contain) rather than exact strings. They require Ollama running with the configured model — if Ollama is unavailable, LLM tests are skipped gracefully.
-
-## Contributing
-
-Every change must update **code, tests, and docs together** in the same commit:
-
-1. **Code** — implement the change in `server.py` / `gui.py` / etc.
-2. **Tests** — add or update tests in `tests.py` covering the change
-3. **Docs** — update this README to reflect the new behavior
-
-Run `python tests.py --regex-only` before committing (fast, no dependencies). Run `python tests.py` for the full suite if Ollama is available.
-
-AI agents: see `CLAUDE.md` for detailed project conventions, architecture, and regex pattern rules.
-
-## Privacy
-
-- All processing is local — audio never leaves your network
-- Temp audio files are deleted immediately after processing
-- Tailscale encrypts all phone-to-PC traffic
-- No cloud APIs
-
----
-
-# Rework notes (branch `rework/spokenly-v2-engine`)
-
-The transcription pipeline is being rebuilt as a **Python stdio sidecar**
-(`engine/engine.py`) owned by a new Electron shell — no FastAPI, no HTTP, no
-port. The full Parakeet pipeline, pronunciation-fix, and regex-cleanup logic
-is ported verbatim from the legacy `server.py`. See `SPEC.md` for the design.
-
-## Engine
-
-`engine/engine.py` speaks newline-delimited JSON over stdio: protocol on
-stdout only, diagnostics on stderr. Request ops: `ping`, `transcribe`
-(`wav_path`), `set_fixes` (hot-reloads replacement words and persists them
-into the config file), `shutdown`.
-
-### Launch command (the command line that works)
-
-```
-python -u engine\engine.py --config config.json
-```
-
-- Use `python` (Python 3.14, `C:\Python314\python.exe`) — it is the install
-  that has `onnx_asr`, `onnxruntime-gpu` (CUDA), `word2number`, and `httpx`.
-  (`py -3.11` does **not** have the deps.)
-- The `-u` flag keeps stdout unbuffered. The engine also flushes every
-  response line explicitly, but spawn with `-u` anyway for safety.
-- The model is preloaded before the engine reads stdin; the first `ping`
-  after startup answers `ready: true`.
-
-### Verification helpers
-
-```
-python engine\engine_tests.py    # 115 deterministic pipeline tests
-python engine\smoke_client.py    # spawns engine like the Electron shell will: ping → transcribe → set_fixes → shutdown
-```
-
-## Notes for the Electron shell
-
-- Spawn exactly like `engine/smoke_client.py` does:
-  `[python, "-u", <path to engine.py>, "--config", <abs config path>]` with
-  piped stdio.
-- stdout is protocol only — never parse it for logs; read stderr for logs.
-- Every response is flushed immediately; read line-by-line (partial lines
-  are safe).
-- If the model fails to load, the engine still runs and reports
-  `ready: false` + `error` on `ping`; `transcribe` returns `ok: false`.
-- stdin EOF or a `shutdown` op ends the engine with exit code 0.
-
-## Running the Remote Voice app (Electron + engine sidecar)
-
-The rebuilt app lives in `app/` (Electron shell) with the Python engine sidecar
-in `engine/`. Data is stored in `%APPDATA%/Remote Voice/`.
-
-### Run from source (recommended)
-
-1. One-time install: open a terminal in `app/` and run `npm install`.
-2. Double-click `Remote Voice.bat` (repo root) - or use the `Remote Voice`
-   desktop shortcut. It starts the app detached with no console window;
-   a second launch while the app is running just focuses the existing app.
-   If `node_modules` is missing, the launcher shows a message telling you to
-   run `npm install` once instead of failing silently.
-
-### Packaged exe (optional)
-
-`npm run package` (in `app/`) builds `dist\Remote Voice-win32-x64\Remote Voice.exe`
-via `@electron/packager`, bundling `engine/` and a seed `config.json` as
-resources. The packaged exe still requires a system `python` with the engine
-dependencies (`onnx_asr`, `onnxruntime-gpu` (CUDA), `word2number`, `httpx`) on
-PATH or set as `python_cmd` in `%APPDATA%/Remote Voice/config.json` - the
-Python engine is NOT bundled into the exe.
+The installer build assembles the Electron package, embedded Python runtime,
+Python dependencies from `engine/requirements.txt`, the speech model cache,
+and the uninstall helper. Its local cache and staging data live under the
+ignored `packaging/cache/` and `packaging/stage/` directories. The split
+installer output is written to ignored `distributable/`.
+
+## Runtime design
+
+The Electron main process owns the tray, hotkey, recorder, overlay, settings,
+history, and paste workflow. It launches the Python sidecar over newline-
+delimited JSON on standard input/output. The sidecar owns model loading,
+provider selection, transcription, and text cleanup.
+
+Per-user configuration and history are stored under the normal Windows user
+data directories; they are not committed to the repository.
