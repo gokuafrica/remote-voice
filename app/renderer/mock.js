@@ -14,6 +14,7 @@
     mic_device: null,
     sample_rate: 16000,
     voice_model: 'nemo-parakeet-tdt-0.6b-v2',
+    voice_device: 'gpu',
     pronunciation_fixes: {},
     overlay_position: 'bottom',
     history_max: 50,

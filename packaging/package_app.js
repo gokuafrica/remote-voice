@@ -31,7 +31,7 @@ packager({
   arch: 'x64',
   executableName: 'Remote Voice',
   electronVersion: require(path.join(appDir, 'node_modules', 'electron', 'package.json')).version,
-  appVersion: '0.1.0',
+  appVersion: '0.2.0',
   overwrite: true,
   prune: true,
   ignore: ignoreNonWindowsNative,

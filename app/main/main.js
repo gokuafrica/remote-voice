@@ -65,6 +65,7 @@ function migrateLegacyData() {
 // tray menu, hot-reload engine fixes. Both paths go through exactly this so
 // they can never diverge again.
 function applyChange(patch) {
+  const oldDevice = config.get().voice_device;
   config.set(patch || {});
   const cfg = config.get();
   let autoStart = null;
@@ -81,6 +82,14 @@ function applyChange(patch) {
     engine.setFixes(cfg.pronunciation_fixes).catch((err) => {
       log(`set_fixes after save failed: ${err.message}`);
     });
+  }
+  // Model device (GPU/CPU) is chosen at engine spawn time — restart so the
+  // new choice takes effect. The settings renderer always sends the full
+  // config, so only restart when the value actually changed.
+  if (Object.prototype.hasOwnProperty.call(patch || {}, 'voice_device')
+      && cfg.voice_device !== oldDevice) {
+    engine.restart(config);
+    log(`voice device ${oldDevice} -> ${cfg.voice_device}; engine restarting`);
   }
   hotkey.applyConfig(cfg);
   tray.rebuildMenu();
@@ -213,7 +222,7 @@ async function onReady() {
         lastCmd = cmd;
         if (cmd === 'recording') { windows.showOverlay(); windows.sendOverlayState('recording', 0.6); }
         else if (cmd === 'processing') { windows.showOverlay(); windows.sendOverlayState('processing', 0); }
-        else if (cmd === 'page-hidden') { windows.showOverlay(); setTimeout(() => { const o = windows.windows.overlay; if (o && !o.isDestroyed()) o.webContents.send('overlay:state', { state: 'hidden', level: 0 }); }, 500); }
+        else if (cmd === 'page-hidden') { windows.showOverlay(); setTimeout(() => windows.sendOverlayState('hidden', 0), 500); }
         else if (cmd === 'hidden') windows.hideOverlay();
       }
     }, 200);

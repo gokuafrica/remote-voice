@@ -146,6 +146,21 @@ class Engine extends EventEmitter {
     this._startWithCandidates(this._candidates(cfg), script, config);
   }
 
+  // Stop the current engine process and spawn a new one (model device changes
+  // require a full reload). Async-kill of the old process is handled inside
+  // shutdown(); the old proc's exit handler no longer owns status because it
+  // no longer matches this.proc once the replacement spawns.
+  restart(config) {
+    if (this.started) this.shutdown();
+    this.started = false;
+    this.shuttingDown = false;
+    this.ready = false;
+    this.model = null;
+    this.error = null;
+    this._setStatus(false, null, null);
+    this.start(config);
+  }
+
   _startWithCandidates(candidates, script, config) {
     if (candidates.length === 0) {
       log('no working python command found');
@@ -204,12 +219,14 @@ class Engine extends EventEmitter {
 
     proc.on('exit', (code) => {
       clearTimeout(probeTimer);
-      if (this.shuttingDown) return;
+      // Only the live engine owns status/pending state. During restart() the
+      // old proc exits after the replacement spawns (graceful-kill grace
+      // period); rejecting the new engine's pending requests here would kill
+      // its startup probes.
+      if (this.proc !== proc) return;
       this._rejectAllPending('engine exited');
-      if (this.proc === proc) {
-        this.proc = null;
-        this._setStatus(false, null, `engine exited (code ${code})`);
-      }
+      this.proc = null;
+      this._setStatus(false, null, `engine exited (code ${code})`);
     });
 
     // probe: first successful ping response locks the candidate
@@ -235,8 +252,9 @@ class Engine extends EventEmitter {
         .then((resp) => {
           if (!this.proc || this.shuttingDown) return;
           if (resp.ready) {
-            log(`model ready: ${resp.model}`);
-            this._setStatus(true, resp.model || null, null);
+            const device = resp.device ? ` [${resp.device}]` : '';
+            log(`model ready: ${resp.model}${device}`);
+            this._setStatus(true, `${resp.model || 'unknown model'}${device}`, null);
             if (config.get().pronunciation_fixes) {
               this.setFixes(config.get().pronunciation_fixes).catch((e) =>
                 log(`initial set_fixes failed: ${e.message}`));

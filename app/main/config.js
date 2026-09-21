@@ -11,6 +11,7 @@ const DEFAULTS = {
   mic_device: null,
   sample_rate: 16000,
   voice_model: 'nemo-parakeet-tdt-0.6b-v2',
+  voice_device: 'gpu',
   pronunciation_fixes: {},
   overlay_position: 'bottom',
   history_max: 50,
@@ -145,6 +146,15 @@ function set(patch) {
       patch = rest;
     } else {
       patch = { ...patch, mode: m };
+    }
+  }
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'voice_device')) {
+    const d = String(patch.voice_device || '').trim().toLowerCase();
+    if (d === 'gpu' || d === 'cpu') patch = { ...patch, voice_device: d };
+    else {
+      const { voice_device, ...rest } = patch;
+      void voice_device;
+      patch = rest; // unknown value: leave existing untouched
     }
   }
   Object.assign(config, patch);

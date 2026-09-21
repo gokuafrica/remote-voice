@@ -107,6 +107,17 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="field">
+            <label for="device-select">Model device</label>
+            <select id="device-select">
+              <option value="gpu">GPU (fast, uses VRAM)</option>
+              <option value="cpu">CPU (no VRAM, slower)</option>
+            </select>
+            <div class="hint" id="device-hint">Switching reloads the model — takes a few seconds.</div>
+          </div>
+        </div>
+
         <div class="reset-row">
           <button id="reset-btn" class="btn subtle" title="Restore every setting to its default value">Reset to defaults</button>
         </div>

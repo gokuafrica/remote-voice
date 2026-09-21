@@ -71,6 +71,7 @@ from word2number import w2n
 CONFIG_PATH = None
 cfg = {}
 VOICE_MODEL = "nemo-parakeet-tdt-0.6b-v2"
+VOICE_DEVICE = "gpu"  # "gpu" (CUDA) or "cpu"
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 CLEANUP_PROMPT = "Clean this transcript:\n"
@@ -139,22 +140,23 @@ model_error = None
 
 
 def load_voice_model():
-    """Prefer CUDA, but keep the engine usable without a compatible GPU.
+    """Load on voice_device ("gpu" | "cpu"), falling back to CPU if the GPU load fails.
 
     The GPU wheel also advertises TensorRT even when TensorRT is not installed,
     so do not let onnx-asr select providers from the wheel's advertised list.
     """
-    try:
-        return onnx_asr.load_model(
-            VOICE_MODEL,
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-        )
-    except Exception as exc:
-        log.warning("GPU model load failed; retrying on CPU: %s", exc)
-        return onnx_asr.load_model(
-            VOICE_MODEL,
-            providers=["CPUExecutionProvider"],
-        )
+    if VOICE_DEVICE == "gpu":
+        try:
+            return onnx_asr.load_model(
+                VOICE_MODEL,
+                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            )
+        except Exception as exc:
+            log.warning("GPU model load failed; retrying on CPU: %s", exc)
+    return onnx_asr.load_model(
+        VOICE_MODEL,
+        providers=["CPUExecutionProvider"],
+    )
 
 
 def _find_ffmpeg() -> str:
@@ -594,6 +596,7 @@ def handle_ping(msg: dict) -> dict:
         "ok": True,
         "ready": model_ready,
         "model": VOICE_MODEL,
+        "device": VOICE_DEVICE,
         "error": model_error,
     }
 
@@ -741,7 +744,7 @@ def parse_args(argv: list[str]) -> str:
 
 
 def main() -> None:
-    global CONFIG_PATH, cfg, VOICE_MODEL, OLLAMA_URL, OLLAMA_MODEL
+    global CONFIG_PATH, cfg, VOICE_MODEL, VOICE_DEVICE, OLLAMA_URL, OLLAMA_MODEL
     global CLEANUP_PROMPT, PRONUNCIATION_FIXES, PRONUNCIATION_FIX_PATTERNS
     global model, model_ready, model_error
 
@@ -751,12 +754,16 @@ def main() -> None:
     OLLAMA_URL = cfg.get("ollama_url", OLLAMA_URL)
     OLLAMA_MODEL = cfg.get("ollama_model", OLLAMA_MODEL)
     VOICE_MODEL = cfg.get("voice_model", VOICE_MODEL)
+    VOICE_DEVICE = str(cfg.get("voice_device", VOICE_DEVICE)).strip().lower()
+    if VOICE_DEVICE not in ("gpu", "cpu"):
+        log.warning(f"Unknown voice_device '{VOICE_DEVICE}' — using 'gpu'")
+        VOICE_DEVICE = "gpu"
     CLEANUP_PROMPT = cfg.get("cleanup_prompt", CLEANUP_PROMPT)
     PRONUNCIATION_FIXES = cfg.get("pronunciation_fixes", {})
     PRONUNCIATION_FIX_PATTERNS = compile_pronunciation_fixes(PRONUNCIATION_FIXES)
 
     log.info(f"Engine starting. Config: {CONFIG_PATH or '(none)'}")
-    log.info(f"Voice model: {VOICE_MODEL} | fixes: {len(PRONUNCIATION_FIX_PATTERNS)} patterns")
+    log.info(f"Voice model: {VOICE_MODEL} | device: {VOICE_DEVICE} | fixes: {len(PRONUNCIATION_FIX_PATTERNS)} patterns")
 
     # Preload the model BEFORE reading stdin so ping can report ready immediately.
     t0 = time.perf_counter()

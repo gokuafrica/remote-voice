@@ -53,6 +53,7 @@
     config.auto_start = $('auto-start').checked;
     config.mic_device = $('mic-select').value === 'default' ? null : $('mic-select').value;
     config.use_llm = $('use-llm').checked;
+    config.voice_device = $('device-select').value === 'cpu' ? 'cpu' : 'gpu';
     config.ollama_url = $('ollama-url').value.trim();
     config.ollama_model = $('ollama-model').value.trim();
     config.pronunciation_fixes = fixesToObject();
@@ -210,6 +211,16 @@
   }
 
   $('auto-start').addEventListener('change', () => saveAll());
+
+  // ---------------------------------------------------------------- device
+
+  $('device-select').addEventListener('change', () => {
+    saveAll(); // instant: discrete control; main restarts the engine
+    const device = $('device-select').value;
+    $('device-hint').textContent = device === 'cpu'
+      ? 'CPU mode: the model uses system RAM instead of VRAM — expect slower transcription.'
+      : 'Switching reloads the model — takes a few seconds.';
+  });
 
   // ------------------------------------------------------------------- LLM
 
@@ -525,6 +536,7 @@
     $('auto-start').checked = !!config.auto_start;
     $('use-llm').checked = !!config.use_llm;
     $('llm-collapse').classList.toggle('open', !!config.use_llm);
+    $('device-select').value = config.voice_device === 'cpu' ? 'cpu' : 'gpu';
     $('ollama-url').value = config.ollama_url || '';
     $('ollama-model').value = config.ollama_model || '';
     $('sample-rate').textContent = `${config.sample_rate || 16000} Hz`;

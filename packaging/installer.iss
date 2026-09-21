@@ -27,7 +27,7 @@
 [Setup]
 AppId={{7C4E9A31-2B5D-4F08-9A6E-1D3C5E7B9042}
 AppName=Remote Voice
-AppVersion=0.1.0
+AppVersion=0.2.0
 AppPublisher=Remote Voice
 ; Per-user install: this matches the app's per-user settings and autostart
 ; model and avoids requiring elevation for normal installation.
