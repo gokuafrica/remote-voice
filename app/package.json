@@ -11,7 +11,8 @@
     "smoke": "electron . --smoke",
     "package": "node ..\\packaging\\package_app.js",
     "test:autostart": "node main\\autostart.test.js",
-    "test:recorder": "node main\\recorder.test.js"
+    "test:recorder": "node main\\recorder.test.js",
+    "test:windows": "node main\\windows.test.js"
   },
   "devDependencies": {
     "electron": "44.3.0",

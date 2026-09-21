@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('remotevoice', {
   onOverlayState(cb) {
     ipcRenderer.on('overlay:state', (e, payload) => cb(payload));
   },
+  overlayReady() {
+    ipcRenderer.send('overlay:ready');
+  },
   overlayCancel() {
     ipcRenderer.send('overlay:cancel');
   },

@@ -100,6 +100,11 @@
     }
   });
 
+  // Register the state listener before telling the main process that this
+  // renderer is ready. Main then replays its cached desired state, including
+  // after a reload or a renderer-process recovery.
+  if (typeof api.overlayReady === 'function') api.overlayReady();
+
   pill.addEventListener('click', () => {
     if (performance.now() - shownAt < 150) return; // click-guard
     api.overlayCancel();

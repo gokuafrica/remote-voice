@@ -20,6 +20,12 @@ const windows = {
   deps: null,
 };
 
+// Overlay state is intentionally cached in the main process. A BrowserWindow
+// can be created, hidden, or reloaded independently of the recording state;
+// renderer IPC is not a durable state channel.
+let overlayState = { state: 'hidden', level: 0 };
+let overlayReady = false;
+
 function rendererPath(name) {
   return path.join(__dirname, '..', 'renderer', name);
 }
@@ -29,6 +35,11 @@ function init(deps) {
   windows.deps = deps;
   ipcMain.on('overlay:cancel', () => {
     if (deps.onCancel) deps.onCancel('overlay click');
+  });
+  ipcMain.on('overlay:ready', (event) => {
+    const win = windows.overlay;
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+    markOverlayReady(win, 'renderer handshake');
   });
 }
 
@@ -40,13 +51,42 @@ function settingsFileExists() {
   return fs.existsSync(rendererPath('settings.html'));
 }
 
+function sendOverlayStateToRenderer(win) {
+  if (!win || win.isDestroyed() || !overlayReady) return false;
+  try {
+    win.webContents.send('overlay:state', { ...overlayState });
+    return true;
+  } catch (e) {
+    log(`overlay state send failed: ${e.message}`);
+    return false;
+  }
+}
+
+function markOverlayReady(win, source) {
+  if (windows.overlay !== win || win.isDestroyed()) return;
+  overlayReady = true;
+  sendOverlayStateToRenderer(win);
+  if (overlayState.state !== 'hidden') win.showInactive();
+  log(`overlay renderer ready (${source})`);
+}
+
+function discardOverlay(win, reason) {
+  if (windows.overlay !== win) return;
+  overlayReady = false;
+  windows.overlay = null;
+  log(`overlay discarded: ${reason}`);
+  try {
+    if (!win.isDestroyed()) win.destroy();
+  } catch (_) { /* best effort */ }
+}
+
 function createOverlay() {
   if (windows.overlay && !windows.overlay.isDestroyed()) return windows.overlay;
   if (!overlayFileExists()) {
     log('overlay.html missing — overlay disabled (UI agent pending)');
     return null;
   }
-  windows.overlay = new BrowserWindow({
+  const win = new BrowserWindow({
     show: false,
     frame: false,
     transparent: true,
@@ -67,10 +107,43 @@ function createOverlay() {
       backgroundThrottling: false,
     },
   });
-  windows.overlay.setAlwaysOnTop(true, 'screen-saver');
-  windows.overlay.loadFile(rendererPath('overlay.html'));
-  windows.overlay.on('closed', () => { windows.overlay = null; });
-  return windows.overlay;
+  windows.overlay = win;
+  overlayReady = false;
+
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.webContents.on('did-start-loading', () => {
+    if (windows.overlay !== win) return;
+    overlayReady = false;
+    if (win.isVisible()) win.hide();
+  });
+  win.webContents.on('did-finish-load', () => {
+    if (windows.overlay === win) log('overlay document loaded; awaiting renderer handshake');
+  });
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+    if (isMainFrame === false) return;
+    log(`overlay load failed (${errorCode}): ${errorDescription}`);
+    discardOverlay(win, 'main-frame load failure');
+  });
+  win.webContents.on('preload-error', (_event, preloadPath, error) => {
+    log(`overlay preload failed (${preloadPath}): ${error && error.message ? error.message : error}`);
+    discardOverlay(win, 'preload failure');
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const reason = details && details.reason ? details.reason : 'unknown reason';
+    log(`overlay renderer gone: ${reason}`);
+    discardOverlay(win, 'renderer process gone');
+  });
+  win.on('closed', () => {
+    if (windows.overlay === win) {
+      windows.overlay = null;
+      overlayReady = false;
+    }
+  });
+  win.loadFile(rendererPath('overlay.html')).catch((e) => {
+    log(`overlay load promise rejected: ${e.message}`);
+    discardOverlay(win, 'load promise rejection');
+  });
+  return win;
 }
 
 function positionOverlay() {
@@ -87,7 +160,11 @@ function positionOverlay() {
       const bounds = windows.deps.tray.tray.getBounds();
       pos = { x: bounds.x - OVERLAY_SIZE.width, y: bounds.y - OVERLAY_SIZE.height - 8 };
     } catch (_) {
-      pos = null;
+      log('tray bounds unavailable — positioning overlay at bottom center');
+      pos = {
+        x: wa.x + Math.round((wa.width - OVERLAY_SIZE.width) / 2),
+        y: wa.y + wa.height - OVERLAY_SIZE.height - 18,
+      };
     }
   } else if (cfg.overlay_position === 'cursor') {
     pos = { x: cursor.x - OVERLAY_SIZE.width / 2, y: cursor.y + 24 };
@@ -105,28 +182,33 @@ function positionOverlay() {
 }
 
 function showOverlay() {
+  overlayState = { state: 'recording', level: 0 };
   const win = createOverlay();
   if (!win) return;
   positionOverlay();
-  win.showInactive();
-  win.webContents.send('overlay:state', { state: 'recording', level: 0 });
-  log('overlay shown');
+  if (overlayReady) {
+    sendOverlayStateToRenderer(win);
+    win.showInactive();
+    log('overlay shown');
+  } else {
+    log('overlay show deferred until renderer ready');
+  }
 }
 
 function hideOverlay() {
+  overlayState = { state: 'hidden', level: 0 };
   const win = windows.overlay;
   if (win && !win.isDestroyed()) {
-    win.webContents.send('overlay:state', { state: 'hidden', level: 0 });
+    sendOverlayStateToRenderer(win);
     win.hide();
     log('overlay hidden');
   }
 }
 
 function sendOverlayState(stateName, level) {
+  overlayState = { state: stateName, level: Number(level) || 0 };
   const win = windows.overlay;
-  if (win && !win.isDestroyed() && win.isVisible()) {
-    win.webContents.send('overlay:state', { state: stateName, level });
-  }
+  sendOverlayStateToRenderer(win);
 }
 
 function createSettings() {
