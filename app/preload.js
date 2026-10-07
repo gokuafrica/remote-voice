@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('remotevoice', {
   overlayReady() {
     ipcRenderer.send('overlay:ready');
   },
+  overlayApplied(sequence) {
+    ipcRenderer.send('overlay:applied', sequence);
+  },
   overlayCancel() {
     ipcRenderer.send('overlay:cancel');
   },

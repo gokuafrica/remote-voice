@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { BrowserWindow, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, ipcMain } = require('electron');
 
 // Matches the overlay CSS design (renderer README: ~240x60). Keep in sync
 // with app/renderer/overlay.css.
@@ -11,6 +11,15 @@ const SETTINGS_SIZE = { width: 940, height: 680 };
 
 function log(msg) {
   console.log(`[windows] ${msg}`);
+  // Small, local lifecycle-only log: no audio, transcripts, or settings.
+  try {
+    const file = path.join(app.getPath('userData'), 'overlay.log');
+    if (fs.existsSync(file) && fs.statSync(file).size > 256 * 1024) {
+      fs.copyFileSync(file, `${file}.previous`);
+      fs.writeFileSync(file, '');
+    }
+    fs.appendFileSync(file, `${new Date().toISOString()} ${msg}\n`);
+  } catch (_) { /* diagnostics must never interrupt dictation */ }
 }
 
 const windows = {
@@ -25,6 +34,46 @@ const windows = {
 // renderer IPC is not a durable state channel.
 let overlayState = { state: 'hidden', level: 0 };
 let overlayReady = false;
+let overlayTimer = null;
+let overlayRetryTimer = null;
+let overlaySequence = 0;
+let overlayPending = null;
+let overlayRetries = 0;
+const OVERLAY_TIMEOUT_MS = 3000;
+const OVERLAY_MAX_RETRIES = 2;
+// Fault injection exists only in explicitly opted-in validation processes.
+const validation = process.env.RV_TEST_CMD ? { nextReadyDelay: 0, ignoreApplied: null } : null;
+
+function clearOverlayWatchdog() {
+  clearTimeout(overlayTimer);
+  overlayTimer = null;
+  overlayPending = null;
+}
+
+function watchOverlay(win) {
+  if (overlayTimer || overlayState.state === 'hidden') return;
+  overlayTimer = setTimeout(() => {
+    overlayTimer = null;
+    if (windows.overlay === win) recoverOverlay(win, 'renderer response timed out');
+  }, OVERLAY_TIMEOUT_MS);
+  overlayTimer.unref();
+}
+
+function recoverOverlay(win, reason) {
+  if (windows.overlay !== win) return;
+  discardOverlay(win, reason);
+  if (overlayState.state === 'hidden' || overlayRetries >= OVERLAY_MAX_RETRIES) return;
+  overlayRetries += 1;
+  // Defer recreation out of the old window's event stack. Stopping in the
+  // meantime cancels this retry; a bad renderer cannot create an infinite loop.
+  overlayRetryTimer = setTimeout(() => {
+    overlayRetryTimer = null;
+    if (overlayState.state === 'hidden') return;
+    createOverlay();
+    positionOverlay();
+  }, 100);
+  overlayRetryTimer.unref();
+}
 
 function rendererPath(name) {
   return path.join(__dirname, '..', 'renderer', name);
@@ -39,7 +88,24 @@ function init(deps) {
   ipcMain.on('overlay:ready', (event) => {
     const win = windows.overlay;
     if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+    if (validation && validation.nextReadyDelay) {
+      const delay = validation.nextReadyDelay;
+      validation.nextReadyDelay = 0;
+      setTimeout(() => markOverlayReady(win, 'delayed validation handshake'), delay).unref();
+      return;
+    }
     markOverlayReady(win, 'renderer handshake');
+  });
+  ipcMain.on('overlay:applied', (event, sequence) => {
+    const win = windows.overlay;
+    if (validation && validation.ignoreApplied === win) return;
+    if (!win || win.isDestroyed() || event.sender !== win.webContents
+        || sequence !== overlayPending) return;
+    clearOverlayWatchdog();
+    if (overlayState.state !== 'hidden' && !win.isVisible()) {
+      win.showInactive();
+      log('overlay shown after renderer applied state');
+    }
   });
 }
 
@@ -54,10 +120,15 @@ function settingsFileExists() {
 function sendOverlayStateToRenderer(win) {
   if (!win || win.isDestroyed() || !overlayReady) return false;
   try {
-    win.webContents.send('overlay:state', { ...overlayState });
+    // Keep one acknowledgement outstanding. Level updates must not continually
+    // extend the deadline or invalidate an acknowledgement already in flight.
+    if (overlayPending === null) overlayPending = ++overlaySequence;
+    watchOverlay(win);
+    win.webContents.send('overlay:state', { ...overlayState, sequence: overlayPending });
     return true;
   } catch (e) {
     log(`overlay state send failed: ${e.message}`);
+    recoverOverlay(win, 'state delivery failed');
     return false;
   }
 }
@@ -65,13 +136,14 @@ function sendOverlayStateToRenderer(win) {
 function markOverlayReady(win, source) {
   if (windows.overlay !== win || win.isDestroyed()) return;
   overlayReady = true;
+  clearOverlayWatchdog();
   sendOverlayStateToRenderer(win);
-  if (overlayState.state !== 'hidden') win.showInactive();
   log(`overlay renderer ready (${source})`);
 }
 
 function discardOverlay(win, reason) {
   if (windows.overlay !== win) return;
+  clearOverlayWatchdog();
   overlayReady = false;
   windows.overlay = null;
   log(`overlay discarded: ${reason}`);
@@ -109,11 +181,14 @@ function createOverlay() {
   });
   windows.overlay = win;
   overlayReady = false;
+  watchOverlay(win);
 
   win.setAlwaysOnTop(true, 'screen-saver');
   win.webContents.on('did-start-loading', () => {
     if (windows.overlay !== win) return;
     overlayReady = false;
+    clearOverlayWatchdog();
+    watchOverlay(win);
     if (win.isVisible()) win.hide();
   });
   win.webContents.on('did-finish-load', () => {
@@ -122,26 +197,27 @@ function createOverlay() {
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
     if (isMainFrame === false) return;
     log(`overlay load failed (${errorCode}): ${errorDescription}`);
-    discardOverlay(win, 'main-frame load failure');
+    recoverOverlay(win, 'main-frame load failure');
   });
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     log(`overlay preload failed (${preloadPath}): ${error && error.message ? error.message : error}`);
-    discardOverlay(win, 'preload failure');
+    recoverOverlay(win, 'preload failure');
   });
   win.webContents.on('render-process-gone', (_event, details) => {
     const reason = details && details.reason ? details.reason : 'unknown reason';
     log(`overlay renderer gone: ${reason}`);
-    discardOverlay(win, 'renderer process gone');
+    recoverOverlay(win, 'renderer process gone');
   });
   win.on('closed', () => {
     if (windows.overlay === win) {
+      clearOverlayWatchdog();
       windows.overlay = null;
       overlayReady = false;
     }
   });
   win.loadFile(rendererPath('overlay.html')).catch((e) => {
     log(`overlay load promise rejected: ${e.message}`);
-    discardOverlay(win, 'load promise rejection');
+    recoverOverlay(win, 'load promise rejection');
   });
   return win;
 }
@@ -182,13 +258,18 @@ function positionOverlay() {
 }
 
 function showOverlay() {
+  clearTimeout(overlayRetryTimer);
+  overlayRetryTimer = null;
+  overlayRetries = 0;
+  // Transparent native windows can survive with stale content after long idle
+  // periods. Give each recording a fresh surface, without touching the recorder.
+  if (windows.overlay) discardOverlay(windows.overlay, 'new recording');
   overlayState = { state: 'recording', level: 0 };
   const win = createOverlay();
   if (!win) return;
   positionOverlay();
   if (overlayReady) {
     sendOverlayStateToRenderer(win);
-    win.showInactive();
     log('overlay shown');
   } else {
     log('overlay show deferred until renderer ready');
@@ -197,10 +278,13 @@ function showOverlay() {
 
 function hideOverlay() {
   overlayState = { state: 'hidden', level: 0 };
+  clearTimeout(overlayRetryTimer);
+  overlayRetryTimer = null;
+  clearOverlayWatchdog();
   const win = windows.overlay;
   if (win && !win.isDestroyed()) {
-    sendOverlayStateToRenderer(win);
     win.hide();
+    discardOverlay(win, 'recording ended');
     log('overlay hidden');
   }
 }
@@ -276,3 +360,9 @@ module.exports = {
   settingsFileExists,
   get windows() { return windows; },
 };
+if (validation) {
+  module.exports.validation = {
+    delayNextReady(ms) { validation.nextReadyDelay = ms; },
+    ignoreCurrentApplied() { validation.ignoreApplied = windows.overlay; },
+  };
+}

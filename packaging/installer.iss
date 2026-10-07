@@ -56,8 +56,7 @@ CloseApplications=no
 ; resources\hf_cache (staged by build_installer.ps1). Exclude pip/wheel
 ; caches and bytecode from the embedded python tree.
 Source: "{#STAGEDIR}\app\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "python311\pip\cache\*,*.pyc,__pycache__"
-; Uninstall cleanup helper. It runs before Inno removes {app}.
-Source: "cleanup_uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; The uninstall cleanup helper is included in the staged app tree.
 
 [Icons]
 Name: "{group}\Remote Voice"; Filename: "{app}\Remote Voice.exe"; WorkingDir: "{app}"

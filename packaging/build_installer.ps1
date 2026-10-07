@@ -14,7 +14,8 @@
 # Admin NOT required to build (the installer elevates at install time).
 
 param(
-    [string]$PythonVersion = '3.11.9'
+    [string]$PythonVersion = '3.11.9',
+    [string]$PayloadManifest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -304,6 +305,23 @@ New-Item -ItemType Directory -Force -Path $resources | Out-Null
 Copy-Item -LiteralPath $stagePython -Destination (Join-Path $resources 'python311') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'engine\engine.py') -Destination (Join-Path $resources 'engine\engine.py') -Force
 Copy-Item -LiteralPath $stageHf -Destination (Join-Path $resources 'hf_cache') -Recurse -Force
+# Keep the staging tree identical to what Setup installs, so release validation
+# can compare the complete installed payload rather than filtering differences.
+Copy-Item -LiteralPath (Join-Path $packagingDir 'cleanup_uninstall.ps1') -Destination $appStage -Force
+$resolvedAppStage = (Resolve-Path -LiteralPath $appStage).Path
+Get-ChildItem -LiteralPath $resolvedAppStage -Recurse -File -Filter '*.pyc' | ForEach-Object {
+    if (-not $_.FullName.StartsWith($resolvedAppStage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Bytecode path escaped staging tree' }
+    Remove-Item -LiteralPath $_.FullName -Force
+}
+if ($PayloadManifest) {
+    Get-ChildItem -LiteralPath $appStage -Recurse -File | ForEach-Object {
+        [pscustomobject]@{
+            Path = [IO.Path]::GetRelativePath($appStage, $_.FullName).Replace('\', '/')
+            Size = $_.Length
+            SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        }
+    } | Sort-Object Path | Export-Csv -LiteralPath $PayloadManifest -NoTypeInformation
+}
 Write-Host "  staged: app payload + resources\python311 + resources\engine + resources\hf_cache"
 
 # ---------------------------------------------------------------------------

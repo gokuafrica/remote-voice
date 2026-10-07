@@ -84,7 +84,7 @@
     ensureRaf();
   }
 
-  api.onOverlayState(({ state, level }) => {
+  api.onOverlayState(({ state, level, sequence }) => {
     if (state === 'recording') {
       label.textContent = 'Listening…';
       show('recording');
@@ -98,6 +98,9 @@
     } else {
       hide();
     }
+    // Readiness only proves the listener was installed. Acknowledge after the
+    // DOM update so main can detect a stalled renderer and replace its window.
+    if (typeof api.overlayApplied === 'function') api.overlayApplied(sequence);
   });
 
   // Register the state listener before telling the main process that this

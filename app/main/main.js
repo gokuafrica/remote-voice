@@ -220,6 +220,51 @@ async function onReady() {
       try { cmd = tfs.readFileSync(cmdFile, 'utf8').trim(); } catch (_) {}
       if (cmd && cmd !== lastCmd) {
         lastCmd = cmd;
+        // JSON commands carry unique IDs, allowing repeated operations and
+        // asynchronous result collection without changing production IPC.
+        if (cmd.startsWith('{')) {
+          const run = async () => {
+            const request = JSON.parse(cmd);
+            const w = windows.windows.overlay;
+            if (request.action === 'start') await startRecording();
+            else if (request.action === 'stop') await stopRecording();
+            else if (request.action === 'cancel') await cancelRecording('validation');
+            else if (request.action === 'show') windows.showOverlay();
+            else if (request.action === 'hide') windows.hideOverlay();
+            else if (request.action === 'delay-ready') windows.validation.delayNextReady(request.ms);
+            else if (request.action === 'ignore-applied') windows.validation.ignoreCurrentApplied();
+            else if (request.action === 'level') windows.sendOverlayState('recording', request.level);
+            else if (request.action === 'reload' && w) w.webContents.reload();
+            else if (request.action === 'crash' && w) w.webContents.forcefullyCrashRenderer();
+            else if (request.action === 'quit') app.quit();
+            else if (request.action !== 'status') throw new Error('Unknown validation action');
+            const current = windows.windows.overlay;
+            let rendered = null;
+            // Mutating commands (especially crash/reload) must not await IPC
+            // on the document they just invalidated. Inspect via a later status.
+            if (request.action === 'status' && current && !current.isDestroyed() && current.isVisible()) {
+              rendered = await current.webContents.executeJavaScript(`({
+                label: document.getElementById('pill-label').textContent,
+                hidden: document.getElementById('pill').classList.contains('hidden'),
+                opacity: getComputedStyle(document.body).opacity
+              })`);
+              if (request.capture) {
+                const image = await current.webContents.capturePage();
+                tfs.writeFileSync(`${cmdFile}.${request.id}.png`, image.toPNG());
+              }
+            }
+            tfs.writeFileSync(`${cmdFile}.result`, JSON.stringify({
+              id: request.id, state: state.current, engine: lastEngineStatus,
+              overlay: current && !current.isDestroyed() ? {
+                id: current.id, visible: current.isVisible(), bounds: current.getBounds(), rendered,
+              } : null,
+            }));
+          };
+          run().catch((error) => {
+            tfs.writeFileSync(`${cmdFile}.result`, JSON.stringify({ error: error.message }));
+          });
+          return;
+        }
         if (cmd === 'recording') { windows.showOverlay(); windows.sendOverlayState('recording', 0.6); }
         else if (cmd === 'processing') { windows.showOverlay(); windows.sendOverlayState('processing', 0); }
         else if (cmd === 'page-hidden') { windows.showOverlay(); setTimeout(() => windows.sendOverlayState('hidden', 0), 500); }
