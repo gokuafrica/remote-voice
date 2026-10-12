@@ -106,11 +106,14 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
   }
 } else {
+  const lifecycle = require('./lifecycle').install(app);
+  app.remoteVoiceLifecycle = lifecycle;
   app.on('second-instance', () => {
     windows.focusOrCreateSettings();
   });
 
   app.whenReady().then(onReady).catch((e) => {
+    lifecycle.write('startup-failed', { name: e.name, code: e.code });
     log(`startup failed: ${e.message}`);
     if (SMOKE) {
       console.log(JSON.stringify({ tray: false, engine_ready: false, engine: 'error', latency_ms: null, error: e.message }));
@@ -171,7 +174,7 @@ async function onReady() {
     paste,
     windows,
     onApply: (patch) => applyChange(patch),
-    onQuit: () => app.quit(),
+    onQuit: () => { app.remoteVoiceLifecycle.write('tray-quit-requested'); app.quit(); },
   });
 
   hotkey.register(config, {
